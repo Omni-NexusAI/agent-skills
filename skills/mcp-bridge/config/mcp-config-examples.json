@@ -1,0 +1,123 @@
+# Example MCP Configuration for Various Clients
+# Copy and paste the relevant section into your MCP client config
+
+## Claude Desktop
+
+Windows: %APPDATA%\Claude\settings.json
+macOS: ~/Library/Application Support/Claude/settings.json
+
+```json
+{
+  "mcpServers": {
+    "openclaw-bridge": {
+      "command": "python",
+      "args": ["-m", "openclaw_mcp_bridge"],
+      "env": {
+        "OPENCLAW_MCP_LOG_LEVEL": "INFO",
+        
+        "OPENCLAW_AGENT_1_NAME": "docker",
+        "OPENCLAW_AGENT_1_URL": "http://host.docker.internal:18789",
+        "OPENCLAW_AGENT_1_TOKEN": "your-docker-token-here",
+        "OPENCLAW_AGENT_1_ENABLED": "true",
+        
+        "OPENCLAW_AGENT_2_NAME": "native",
+        "OPENCLAW_AGENT_2_URL": "http://localhost:19789",
+        "OPENCLAW_AGENT_2_TOKEN": "your-native-token-here",
+        "OPENCLAW_AGENT_2_ENABLED": "false"
+      }
+    }
+  }
+}
+```
+
+## Agent Zero (A0)
+
+Add to your A0 MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "openclaw-bridge": {
+      "description": "Bridge to Openclaw agents",
+      "command": "/usr/bin/python3",
+      "args": ["-m", "openclaw_mcp_bridge"],
+      "env": {
+        "OPENCLAW_AGENT_1_NAME": "docker",
+        "OPENCLAW_AGENT_1_URL": "http://host.docker.internal:18789",
+        "OPENCLAW_AGENT_1_TOKEN": "your-token-here",
+        "OPENCLAW_AGENT_1_ENABLED": "true"
+      }
+    }
+  }
+}
+```
+
+## Continue.dev
+
+Add to your `.continue/config.json`:
+
+```json
+{
+  "experimental": {
+    "modelContextProtocolServers": [
+      {
+        "transport": {
+          "type": "stdio",
+          "command": "python",
+          "args": ["-m", "openclaw_mcp_bridge"],
+          "env": {
+            "OPENCLAW_AGENT_1_NAME": "docker",
+            "OPENCLAW_AGENT_1_URL": "http://host.docker.internal:18789",
+            "OPENCLAW_AGENT_1_TOKEN": "your-token-here",
+            "OPENCLAW_AGENT_1_ENABLED": "true"
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+## Generic MCP Client
+
+Most MCP clients support this format:
+
+```json
+{
+  "mcpServers": {
+    "openclaw-bridge": {
+      "command": "python",
+      "args": ["-m", "openclaw_mcp_bridge"],
+      "env": {
+        "OPENCLAW_MCP_LOG_LEVEL": "INFO",
+        
+        "OPENCLAW_AGENT_1_NAME": "docker",
+        "OPENCLAW_AGENT_1_URL": "http://host.docker.internal:18789",
+        "OPENCLAW_AGENT_1_TOKEN": "docker-token",
+        "OPENCLAW_AGENT_1_ENABLED": "true",
+        "OPENCLAW_AGENT_1_TIMEOUT": "120",
+        
+        "OPENCLAW_AGENT_2_NAME": "native",
+        "OPENCLAW_AGENT_2_URL": "http://localhost:19789",
+        "OPENCLAW_AGENT_2_TOKEN": "native-token",
+        "OPENCLAW_AGENT_2_ENABLED": "false",
+        
+        "OPENCLAW_AGENT_3_NAME": "remote",
+        "OPENCLAW_AGENT_3_URL": "http://192.168.1.100:18789",
+        "OPENCLAW_AGENT_3_TOKEN": "remote-token",
+        "OPENCLAW_AGENT_3_ENABLED": "false"
+      }
+    }
+  }
+}
+```
+
+## Notes
+
+- Replace token values with your actual Openclaw agent tokens
+- Find tokens in your Openclaw configuration files
+- Docker agents typically use `host.docker.internal` (Docker Desktop)
+- Native agents use `localhost` or `127.0.0.1`
+- Remote agents use the machine's IP address or hostname
+- Enable only agents you actively use
+- Set appropriate timeouts (default: 120 seconds)

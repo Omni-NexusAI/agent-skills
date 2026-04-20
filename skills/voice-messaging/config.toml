@@ -1,0 +1,219 @@
+# Voice Messaging Configuration
+# ==============================
+# This configuration file controls STT (Speech-to-Text) and TTS (Text-to-Speech) providers.
+# Edit this file to switch between local and cloud providers.
+#
+# Documentation: https://github.com/Omni-NexusAI/agent-voice-messaging
+
+# ==============================================================================
+# Default Behavior Configuration
+# ==============================================================================
+
+[defaults]
+auto_process_voice = true
+# When responding to a VOICE message, include the text transcription
+# by default. Only send voice-only if user explicitly requests it.
+include_transcription_on_voice_response = true
+
+# When responding to a TEXT message, do NOT send voice by default.
+# Only send voice if user explicitly asks for it.
+voice_response_to_text_message = false
+
+# ==============================================================================
+# STT (Speech-to-Text) Configuration
+# ==============================================================================
+
+[stt]
+# Provider selection: "whisper" (local), "faster-whisper" (local), "openai" (cloud), or "google" (cloud)
+provider = "whisper"
+
+# ----------------------------------------
+# Whisper (Local, Original OpenAI Whisper)
+# ----------------------------------------
+# Most reliable on Windows
+model = "base"              # tiny, base, small, medium, large
+device = ""                 # empty for auto, or 'cuda', 'cpu'
+
+# ----------------------------------------
+# OpenAI Whisper (Cloud, Fast)
+# ----------------------------------------
+# Requires: export OPENAI_API_KEY="your-key-here"
+# Pricing: https://openai.com/pricing
+#model = "whisper-1"       # Only option available
+#api_key = "${OPENAI_API_KEY}"  # or set as environment variable
+# language = "en"           # Optional: auto-detect if omitted
+
+# ----------------------------------------
+# Google Cloud Speech-to-Text (Cloud)
+# ----------------------------------------
+# Requires: export GOOGLE_API_KEY="your-key-here"
+# Get key from: https://console.cloud.google.com/apis/credentials
+# api_key = "${GOOGLE_API_KEY}"
+# language = "en-US"        # Language code (en-US, es-ES, etc.)
+# profanity_filter = false  # Optional: filter profanity
+
+# ==============================================================================
+# TTS (Text-to-Speech) Configuration
+# ==============================================================================
+
+[tts]
+# Provider selection: "kokoro", "qwen3", "openai", or "elevenlabs"
+provider = "kokoro"
+
+# ----------------------------------------
+# Kokoro TTS (Local, Production Quality)
+# ----------------------------------------
+# Docker Setup Instructions:
+# 1. Pull image: docker pull ghcr.io/omni-nexusai/agent-zero-kokoro-worker:v0.9.8-custom-pre-hybrid-gpu
+# 2. Run container: docker run -d --name kokoro-tts --gpus all -p 8880:8880 \
+#    ghcr.io/omni-nexusai/agent-zero-kokoro-worker:v0.9.8-custom-pre-hybrid-gpu
+# 3. Verify: curl http://localhost:8880/v1/health
+# 4. Without GPU (slower): Remove --gpus all from docker run command
+#
+# Available voices:
+#   af_alloy, af_aoede, af_bella, af_heart, af_jadzia, af_jessica, af_kore,
+#   af_nicole, af_nova, af_river, and 57 more
+#
+base_url = "http://localhost:8880/v1"  # Kokoro server endpoint (uses /v1!)
+voice = "am_michael"                   # Default voice (Michael is am_michael, not bf_michael)
+format = "opus"                         # mp3, wav, opus, flac, m4a, pcm (Kokoro doesn't support ogg!)
+speed = 1.0                            # 0.5 to 2.0 (1.0 = normal speed)
+
+# ----------------------------------------
+# Qwen3 TTS (Local, Customizable)
+# ----------------------------------------
+# Docker Setup Instructions:
+# 1. Pull image: docker pull qwen3-tts-openai-fastapi-qwen3-tts-gpu
+# 2. Run container: docker run -d --name qwen3-tts --gpus all -p 8890:8000 \
+#    qwen3-tts-openai-fastapi-qwen3-tts-gpu
+# 3. Verify: curl http://localhost:8890/health
+#
+# base_url = "http://localhost:8890"    # Qwen3 server endpoint
+# voice = "default"                     # Default or custom voice
+# format = "wav"                        # wav, mp3, ogg
+# speed = 1.0                           # 0.5 to 2.0
+
+# ----------------------------------------
+# OpenAI TTS (Cloud, High Quality)
+# ----------------------------------------
+# Requires: export OPENAI_API_KEY="your-key-here"
+# Pricing: https://openai.com/pricing
+#
+# api_key = "${OPENAI_API_KEY}"         # or set as environment variable
+# model = "tts-1"                       # tts-1 (fast), tts-1-hd (slower, better)
+# voice = "alloy"                       # alloy, echo, fable, onyx, nova, shimmer
+# format = "mp3"                        # mp3, opus, aac, flac, wav, pcm
+# speed = 1.0                           # 0.25 to 4.0
+
+# ----------------------------------------
+# ElevenLabs TTS (Cloud, Premium Quality)
+# ----------------------------------------
+# Requires: export ELEVENLABS_API_KEY="your-key-here"
+# Get key and voice ID from: https://elevenlabs.io
+# Pricing: https://elevenlabs.io/pricing
+#
+# api_key = "${ELEVENLABS_API_KEY}"     # or set as environment variable
+# voice_id = "21m00Tcm4TlvDq8ikWAM"     # Rachel (example) - get your voice ID
+# model = "eleven_multilingual_v2"      # eleven_monolingual_v1, eleven_multilingual_v2
+# format = "mp3"                        # mp3, pcm
+# stability = 0.5                      # 0-1, higher = more stable, less expressive
+# similarity_boost = 0.5               # 0-1, higher = more similar to original voice
+
+# ==============================================================================
+# Audio Processing Configuration
+# ==============================================================================
+
+[audio]
+temp_dir = "/tmp/voice-messaging"     # Temporary directory for audio processing
+sample_rate = 16000                    # Sample rate for STT (Whisper expects 16kHz)
+channels = 1                           # Audio channels (1 = mono)
+
+# ==============================================================================
+# Platform-Specific Configuration
+# ==============================================================================
+
+[platforms]
+telegram_format = "ogg"                # Telegram prefers OGG format
+discord_format = "mp3"                 # Discord prefers MP3 format
+
+# ==============================================================================
+# Example Configurations
+# ==============================================================================
+
+# Example 1: Local-only (Privacy-first, Free)
+# --------------------------------------------
+# [stt]
+# provider = "faster-whisper"
+# model = "base"
+# device = "cpu"
+#
+# [tts]
+# provider = "kokoro"
+# base_url = "http://localhost:8880/v1"
+# voice = "af_bella"
+# format = "ogg"
+
+# Example 2: Cloud-only (Fast, Easy Setup)
+# -----------------------------------------
+# [stt]
+# provider = "openai"
+# api_key = "${OPENAI_API_KEY}"
+# model = "whisper-1"
+#
+# [tts]
+# provider = "openai"
+# api_key = "${OPENAI_API_KEY}"
+# model = "tts-1"
+# voice = "alloy"
+# format = "mp3"
+
+# Example 3: Hybrid (Best of both worlds)
+# ----------------------------------------
+# [stt]
+# provider = "faster-whisper"  # Local STT for privacy
+# model = "base"
+# device = "cpu"
+#
+# [tts]
+# provider = "elevenlabs"  # Cloud TTS for premium voices
+# api_key = "${ELEVENLABS_API_KEY}"
+# voice_id = "21m00Tcm4TlvDq8ikWAM"
+# model = "eleven_multilingual_v2"
+# format = "mp3"
+
+# Example 4: GPU-accelerated (Maximum Performance)
+# -------------------------------------------------
+# [stt]
+# provider = "faster-whisper"
+# model = "medium"
+# device = "cuda"
+# compute_type = "float16"
+#
+# [tts]
+# provider = "kokoro"
+# base_url = "http://localhost:8880/v1"
+# voice = "af_bella"
+# format = "ogg"
+# speed = 1.0
+
+# ==============================================================================
+# Docker Endpoint Status
+# ==============================================================================
+
+# Check if your Docker endpoints are running:
+#
+# Kokoro TTS:
+#   docker ps | grep kokoro
+#   curl http://localhost:8880/v1/health
+#
+# Qwen3 TTS:
+#   docker ps | grep qwen3
+#   curl http://localhost:8890/health
+#
+# Start containers if stopped:
+#   docker start kokoro-tts
+#   docker start qwen3-tts
+#
+# View logs:
+#   docker logs kokoro-tts
+#   docker logs qwen3-tts

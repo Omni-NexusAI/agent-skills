@@ -11,6 +11,7 @@
 | **Initializer** | `skills/initializer/` | Agent synchronization and capability merging | Agent | ✅ Stable |
 | **MCP Bridge** | `skills/mcp-bridge/` | Generic MCP server for communicating with OpenClaw agents | MCP/Any | ✅ Stable |
 | **Local Inference Optimizer** | `skills/local-inference-optimizer/` | Repeatable llama-server tuning (VRAM, MoE, modalities, load tests) | Cursor | ✅ Stable |
+| **Docker Cleanup** | `skills/docker-cleanup/` | Safe cleanup of Docker build waste without deleting intentional resources | Cursor/Any | ✅ Stable |
 
 ## 📁 Repository Structure
 
@@ -23,7 +24,8 @@ agent-skills/
     ├── voice-messaging/         # Voice Messaging skill
     ├── initializer/             # Initializer skill
     ├── mcp-bridge/              # MCP Bridge server
-    └── local-inference-optimizer/  # Inference Optimizer skill
+    ├── local-inference-optimizer/  # Inference Optimizer skill
+    └── docker-cleanup/          # Docker cleanup skill
 ```
 
 ## 🚀 Usage

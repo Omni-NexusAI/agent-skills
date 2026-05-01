@@ -1,15 +1,22 @@
 ---
 name: local-inference-optimizer
-description: Tunes llama.cpp llama-server for balance, maximum speed, or maximum context/reasoning on the host GPU, including MoE offload, modalities (vision/audio), and repeatable Web UI plus load tests. Use when optimizing local inference, new GGUFs, llama-server, VRAM caps, n-cpu-moe, layer counts, reasoning, or multimodal models.
+description: Autoresearch-style tuning system for llama.cpp llama-server. Optimizes dense and MoE models with architecture-aware branches, smart copy-forward seeding, external tester evidence, and repeatable local validation loops for performance, balance, or capacity goals.
 ---
 
-# Local llama-server tuning (repeatable)
+# Local Inference Optimizer (repeatable)
+
+## Canonical source
+
+This monorepo skill is the maintained source of truth.
+- Canonical: `C:\Users\yepyy\Documents\local-inference-optimizer\SKILL.md`
+- Legacy copy in `.cursor/skills` is non-canonical unless explicitly requested.
 
 ## When to apply
 
 - A new GGUF or profile needs **stable** settings on a **known VRAM budget**.
 - User gave a **VRAM ceiling** (e.g. ≤ 15.5 GiB) and a **goal** (see below): tune **toward that goal**, not a one-size-fits-all default.
 - User cares about **vision, audio, or other modalities**: verify capabilities and re-benchmark with representative inputs.
+- Tuning should leverage **external tester evidence** without skipping local validation.
 
 ## Optimization goals (pick explicitly)
 
@@ -28,6 +35,57 @@ Ask or infer which **primary goal** applies; secondary goals are constraints.
 - **Capacity** prioritizes **`ctx-size` / `--fit` / reasoning** and client alignment; may sacrifice peak t/s.
 
 If the user does not state a goal, **default to balance** and state that assumption in notes.
+
+## Decision gates (required before sweeping)
+
+### Gate A: model class (dense vs MoE)
+
+Determine class from GGUF/log metadata before selecting strategy.
+
+- **Dense branch**
+  - Prioritize getting as many layers as possible on GPU (`-ngl`) when VRAM allows.
+  - Do not blindly inherit large `ctx-size`; re-size context for this model's VRAM and goal.
+  - For performance-focused dense runs, reduce context/batch before leaving many layers on CPU.
+- **MoE branch**
+  - Tune `-ngl` and `--n-cpu-moe` together; interaction is architecture-specific.
+  - Use MoE-specific sweeps and do not copy dense heuristics directly.
+
+### Gate B: architecture family (required)
+
+Detect architecture (for example, Qwen, Nemotron, Llama-family, Mistral-family) from metadata/logs and apply architecture-specific checklist items:
+- context and rope defaults,
+- tokenizer/template behavior,
+- tool-calling and reasoning quirks,
+- modality projector behavior and memory profile,
+- known architecture-specific knobs from trusted evidence.
+
+Do not proceed with a generic sweep until this checklist is filled.
+
+### Gate C: smart copy-forward seeding (allowed but constrained)
+
+Copy-forward is a **starting cue**, not a final answer.
+
+Allow seeding only if all similarity checks pass:
+1. same family and near generation,
+2. same class (dense vs MoE),
+3. compatible quantization level and modality profile,
+4. comparable VRAM tier and hardware envelope.
+
+Rules:
+- Treat seeded params as **hypotheses**.
+- High-risk carryovers (`ctx-size`, `-ngl`, `n-cpu-moe`) require explicit fit and benchmark confirmation.
+- Block blind carryover across incompatible classes/architectures.
+
+## Parameter coverage policy (avoid narrow tuning)
+
+Do not optimize only `ctx-size` / `-ngl` / `n-cpu-moe`.
+For each model, complete a model-specific checklist covering, as applicable:
+- offload/layout: `-ngl`, split mode, main GPU,
+- context/memory: `--ctx-size`, `--fit`, `--fit-ctx`, `--cache-ram`,
+- prefill/decode: `--batch-size`, `--threads`, `--threads-batch`,
+- reasoning/tool behavior: `--reasoning`, `--reasoning-budget`, template kwargs,
+- sampling: `--temp`, `--top-k`, `--top-p`, penalties,
+- modality settings: `--mmproj`, image/audio workload mix.
 
 ## Modalities (vision, audio, etc.)
 
@@ -72,7 +130,14 @@ Steps:
 
 Do not copy `n-cpu-moe` from a different architecture.
 
-### 3. VRAM target band (user threshold)
+### 3. Dense models: offload-first within goal constraints
+
+For dense models, prioritize near-full GPU offload when feasible:
+- Increase `-ngl` until fit/perf constraints object.
+- If slow, first test lower `ctx-size` / batch before accepting heavy CPU layer residency.
+- Ensure decisions are goal-aware (performance may trade VRAM fill for latency).
+
+### 4. VRAM target band (user threshold)
 
 When the user states a cap **T** GiB (e.g. **15.5**), apply the **Optimization goals** table above:
 
@@ -91,13 +156,13 @@ When the user states a cap **T** GiB (e.g. **15.5**), apply the **Optimization g
 
 Confirm with **`nvidia-smi`** (same tool each run) and server logs for projected device memory with **`--fit`**.
 
-### 4. Context, reasoning, and fit
+### 5. Context, reasoning, and fit
 
 - Set **`--ctx-size`** and **`--fit` / `--fit-ctx`** from VRAM, **goal**, and use case; **`n_ctx`** in **`GET /props`** must match downstream clients (Web UI, agent presets **Advanced → Context length**).
 - **`--reasoning` on/off**: part of **capacity vs performance** (reasoning paths can add tokens and latency). Align with user intent; re-run Test A after toggling.
 - **Agent frameworks**: default system prompts can be **tens of thousands of tokens**; **`ctx_length` must be ≤ server `n_ctx`**. Tiny local ctx cannot run full agent stacks regardless of t/s.
 
-### 5. Host prompt cache (`--cache-ram` / `-cram`)
+### 6. Host prompt cache (`--cache-ram` / `-cram`)
 
 llama-server can cap **host DRAM** used for a **RAM-resident prompt / checkpoint cache** (reuse prefixes, reduce re-processing on churn). This is **separate** from KV offload placement.
 
@@ -105,6 +170,39 @@ llama-server can cap **host DRAM** used for a **RAM-resident prompt / checkpoint
 - **`-1`**: no MiB cap; **`0`**: disable.
 
 After changing `-cram`, re-run a short **Test A** on workloads that repeat system/tool prefixes (agents) to see if prefill latency improves without exceeding host RAM budget.
+
+## External evidence policy (autoresearch-inspired)
+
+Before broad sweeps, run a targeted evidence pass:
+1. Gather relevant tester reports/benchmarks for exact model or closest siblings.
+2. Filter sources by recency, hardware comparability, reproducibility detail, and cross-source agreement.
+3. Convert findings into weighted priors for hypotheses.
+4. Validate every imported idea locally before adoption.
+
+External evidence can accelerate search, but never replaces local measurements.
+
+## Autoresearch-style tuning loop (v2)
+
+Max rounds: 3 (+ one pre-round evidence pass). Stop early when promotion criteria are met.
+
+- **Round 0**: define objective, constraints, architecture/class decisions, seeded hypotheses.
+- **Round 0.5**: collect and score external tester evidence for model-specific priors.
+- **Round 1**: broad sweep across key parameter families.
+- **Round 2**: targeted gap-fill based on best candidates and failures.
+- **Round 3**: contradiction and edge-case reconciliation (including modality/parallel pressure).
+
+### Promote/bail criteria
+
+Promote a candidate only if:
+- no OOM/crash under required tests,
+- goal-weighted metrics improve against baseline,
+- VRAM behavior is consistent with goal and cap,
+- required modalities and reasoning/tool paths pass.
+
+Bail or rollback when:
+- instability repeats,
+- gains are not reproducible,
+- constraints are violated (VRAM cap, latency limits, context requirements).
 
 ## Repeatable test harness
 
@@ -151,24 +249,42 @@ Measures behavior closer to agents or multi-user use; critical for **balance** a
 
 Store **per run**: **stated goal**, model id, full flag list (including **`--reasoning`**, **`--mmproj`**, **`--cache-ram`** if set), Test A (short / medium / long / modality as applicable), Test B results, VRAM idle + peak, **`modalities`** from `/props`, and errors.
 
+## Run ledger (required format)
+
+For each candidate run, record at minimum:
+- run id and timestamp,
+- source of params (seeded/manual/evidence),
+- model class and architecture gates,
+- full launch flags,
+- key metrics (`prompt_ms`, `predicted_per_second`, error rate, latency summary),
+- VRAM peak/idle and fit notes,
+- modality and reasoning/tool-call pass/fail,
+- confidence score (low/medium/high) with rationale,
+- decision: promote / hold / reject / rollback.
+
 ## Suggested tuning order
 
-1. Confirm **optimization goal** (balance / performance / capacity) and **modalities** to validate (from user + `/props`).
-2. Establish **topology** (layers / MoE facts) and **VRAM cap T**.
-3. Follow **one** primary path by goal (merge steps from the others only as constraints):
+1. Confirm **optimization goal** (balance / performance / capacity), constraints, and required modalities.
+2. Determine model class and architecture gates; establish topology and VRAM cap T.
+3. Evaluate smart copy-forward eligibility and form initial hypotheses.
+4. Run external evidence pass (Round 0.5) and weight priors.
+5. Follow **one** primary path by goal (merge steps from the others only as constraints):
    - **Capacity-first**: set **`ctx-size`**, **`--fit` / `--fit-ctx`**, **`--reasoning`**, and **`--mmproj`** (if vision) so the model **loads** at the target story; then tune **`-ngl` / batch** to fit **T**.
    - **Performance-first**: start from a **smaller ctx** and lean **batch / threads-batch**; sweep **`-ngl`** and MoE **`n-cpu-moe`** for best **timings**, then grow ctx only if the user needs it.
    - **Balance**: choose ctx + fit, then **raise `-ngl` / batch** until VRAM sits in **\[T−1, T\]** when possible (see **VRAM target band** below).
-4. **MoE only**: sweep **`n-cpu-moe`** at the best `-ngl` candidates (goal-aware; see **MoE** subsection above).
-5. Tune **`--batch-size`** and **`--threads-batch`** (prefill vs decode; multimodal prefill may need different batch than text-only).
-6. If agent-like **prefix reuse** matters, tune **`--cache-ram`** against host RAM budget and re-check Test A prefill.
-7. Run **Test A** (include long-text and **modality** cases per **Repeatable test harness** above).
-8. Run **Test B**; if peak VRAM exceeds **T**, step back **`-ngl`**, **batch**, or **ctx** depending on goal (performance may prefer dropping batch before ctx).
-9. Update **launch script** (`.ps1` / `.sh`) and a **summary**: goal, modalities tested, flags, Test A/B numbers, VRAM idle/peak band.
+6. **MoE only**: sweep **`n-cpu-moe`** at the best `-ngl` candidates.
+7. **Dense only**: verify offload-first behavior before concluding CPU-heavy settings are acceptable.
+8. Tune remaining parameter families (batching, sampling, reasoning budget, cache, modality settings).
+9. Run **Test A** and **Test B**; record in run ledger and apply promote/bail rules.
+10. Update launcher and final summary.
 
 ## Anti-patterns
 
+- Blindly reusing params from another model without class/architecture compatibility checks.
 - Assuming two MoE models share **layer counts** or optimal **`-ngl` / `n-cpu-moe`**.
+- Copying MoE-oriented assumptions into dense models.
+- Leaving dense layers on CPU when VRAM headroom exists and goal does not justify it.
+- Reusing inherited `ctx-size` without validating fit, latency, and goal alignment.
 - Forcing VRAM to **\[T−1, T\]** when the user asked for **performance** and lower VRAM gives better latency—**match the stated goal**.
 - Optimizing **balance** while ignoring **capacity** needs (reasoning, long ctx, vision) or the reverse.
 - Stopping with **large unused VRAM** below **T − 1** on a **balance** run without documenting why (OOM, fit, or user request).
@@ -184,5 +300,8 @@ After tuning, leave:
 
 - Executable **launcher** with all flags explicit (**reasoning**, **mmproj** if used, **cache-ram** if tuned).
 - **Stated optimization goal** and **which modalities** were validated.
+- **Two final candidates**: recommended profile + one fallback profile.
 - **One paragraph**: t/s and/or latency (performance), **n_ctx** and long-context behavior (capacity), VRAM band and caveats (balance).
+- **Evidence summary**: why the winner won (round-by-round) and what was rejected.
+- **Run ledger excerpt** with confidence and promotion decision.
 - If **Web UI / agent** are in scope: **API base**, **exact model id**, **`ctx_length` = `n_ctx`**.

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Agent Workflow Rules"
+  short_description: "Apply safe, project-neutral engineering workflows"
+  default_prompt: "Apply the agent workflow rules while completing this engineering task."
+

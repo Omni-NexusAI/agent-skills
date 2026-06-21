@@ -1,12 +1,11 @@
 ---
 name: agentzero-workflow-rules
-version: 1.0.0
-author: Omni-NexusAI
-description: "Agentspine workflow and safety rules for PR-first GitHub flow, plugin-first feature work, updater-safe changes, Docker handling, and repo defaults. Triggers on: /agentzero-workflow-rules, agentzero workflow rules, agentspine workflow rules, Agentspine repo work, Omni-NexusAI/agentspine, plugin-first Agentspine changes, self-updater-safe changes."
+description: "Archived project-specific workflow rules retained for historical reference. Do not use for new work; use agent-workflow-rules instead."
 allowed-tools: Read Write Edit Glob Grep Bash
-user-invocable: true
 ---
-# Agentspine Workflow Rules (Consolidated)
+# Archived: Agentspine Workflow Rules
+
+This legacy skill is retained as an archive. Use `agent-workflow-rules` for active work.
 
 ## Purpose
 

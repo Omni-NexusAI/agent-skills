@@ -1,9 +1,11 @@
 ---
 name: cursor-workflow-rules
-description: Enforces the user's required development workflow and environment policies, including PR-first GitHub flow, environment handling, MCP usage priority, and documentation/tooling preferences. Use when planning, implementing, testing, committing, pushing, pulling, or operating across repos and environments.
+description: Archived platform-specific workflow rules retained for historical reference. Do not use for new work; use agent-workflow-rules instead.
 ---
 
-# Cursor Workflow Rules
+# Archived: Cursor Workflow Rules
+
+This legacy skill is retained as an archive. Use `agent-workflow-rules` for active work.
 
 ## Purpose
 

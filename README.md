@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | **Agent Workflow Rules** | `skills/agent-workflow-rules/` | Project-neutral engineering workflow, safety, delivery, and verification rules | Agent/Any | Active |
 | **Cursor Workflow Rules** | `skills/cursor-workflow-rules/` | Legacy platform-specific workflow rules | Cursor | Archived |
-| **AgentZero Workflow Rules** | `skills/archive/agentzero/` | Legacy project-specific workflow rules | Agent Zero | Archived |
+| **AgentZero Workflow Rules** | `skills/agentzero-workflow-rules/` | Legacy project-specific workflow rules | Agent Zero | Archived |
 | **SimpleMem** | `skills/simplemem/` | Local memory storage with key-value persistence | OpenClaw | ✅ Stable |
 | **Voice Messaging** | `skills/voice-messaging/` | Modular voice messaging with swappable STT/TTS providers | OpenClaw | ✅ Stable |
 | **Initializer** | `skills/initializer/` | Agent synchronization and capability merging | Agent | ✅ Stable |

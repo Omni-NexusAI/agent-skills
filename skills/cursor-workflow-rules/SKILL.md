@@ -63,6 +63,8 @@ When updating requested Docker images:
 1. Ensure data from previous environment is carried over to the new image(s).
 2. Clean up only older unused images related to that requested environment.
 3. Do not touch containers outside the relevant environment(s).
+4. If the user's request is to update or pull an environment image and they do not explicitly limit the task to "pull only", automatically create or start the corresponding fresh container or service after the image update so the newest environment is actually available for testing.
+5. When that environment's standard deployment includes companion services or workers, start those alongside the main container unless the user explicitly asks to skip them.
 
 ## Trigger Scenarios
 

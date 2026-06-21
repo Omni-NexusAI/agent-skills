@@ -1,27 +1,29 @@
-﻿---
+---
 name: agentzero-workflow-rules
 version: 1.0.0
 author: Omni-NexusAI
-description: "Agentspine workflow and safety rules for PR-first GitHub flow, plugin-first feature work, updater-safe changes, Docker handling, and repo defaults. Triggers on: /agentzero-workflow-rules, agentzero workflow rules, agentspine workflow rules, Agentspine repo work, Omni-NexusAI/agent-zero, plugin-first Agentspine changes, self-updater-safe changes."
+description: "Archived project-specific workflow rules retained for historical reference. Do not use for new work; use agent-workflow-rules instead."
 allowed-tools: Read Write Edit Glob Grep Bash
 user-invocable: true
 ---
-# Agentspine Workflow Rules (Consolidated)
+# Archived: Agentspine Workflow Rules
+
+This legacy skill is retained as an archive. Use `agent-workflow-rules` for active work.
 
 ## Purpose
 
 Apply these rules as hard constraints whenever working in the Agentspine context, including local development, feature implementation, Docker/container workflows, GitHub operations, MCP/tool selection, plugin architecture, self-updater compatibility, and roadmap/documentation alignment.
 
-> **Agentspine** is the user's branded fork of Agent Zero, hosted at `Omni-NexusAI/agent-zero`.
+> **Agentspine** is the user's branded fork of Agent Zero, hosted at `Omni-NexusAI/agentspine`.
 
 ---
 
 ## GitHub & Repository Reference Rules
 
 When working with Agentspine:
-1. Primary repository (default): `Omni-NexusAI/agent-zero`
+1. Primary repository (default): `Omni-NexusAI/agentspine`
 2. Default branch (default): `development` (NOT `dev` or `main`)
-3. For GitHub operations (PRs/issues/commits), code references, and repository interactions: default to `Omni-NexusAI/agent-zero` and `development`.
+3. For GitHub operations (PRs/issues/commits), code references, and repository interactions: default to `Omni-NexusAI/agentspine` and `development`.
 
 Exception cases:
 1. Reference `agent0ai/agent-zero` only when the user explicitly requests it.
@@ -38,12 +40,12 @@ Tags and releases:
 
    Examples: `v0.9.9-standard`, `v0.9.9-standard-pre`, `v0.9.9-gpu`, `v0.9.9-gpu-pre`
 
-2. There is no hybrid build type. Every release is either `standard` or `gpu` â€” never both combined.
+2. There is no hybrid build type. Every release is either `standard` or `gpu` -- never both combined.
 3. The `-custom` suffix was retired. Do NOT use it for new tags. Legacy tags with `-custom` remain in history but are not used going forward.
-4. All tags ONLY exist in `Omni-NexusAI/agent-zero`.
+4. All tags ONLY exist in `Omni-NexusAI/agentspine`.
 5. When cloning by tag, ALWAYS use:
    ```
-   git clone -b <tag-name> https://github.com/Omni-NexusAI/agent-zero.git
+   git clone -b <tag-name> https://github.com/Omni-NexusAI/agentspine.git
    ```
 6. NEVER use `agent0ai/agent-zero` for tag cloning.
 
@@ -142,6 +144,7 @@ User override:
 **Testing & temporary builds**
 1. Treat test builds as temporary. Do not auto-cleanup before validation is complete; after the user confirms validation or says the reference is no longer required, follow the validation pull/build lifecycle below.
 2. Use descriptive names for test builds (e.g., `agentspine-test-pr123`, `agentspine-quick-check`).
+
 **Validation pull/build lifecycle**
 1. When pulling or baking an Agentspine image for release or recovery validation, treat the environment as a temporary validation reference unless the user explicitly says to preserve it.
 2. Before asking the user to validate, verify prerequisite features that matter for that build type, including health, banner/build identity, plugin loading, WebUI availability, settings exposure, STT, TTS, and GPU/CUDA behavior when applicable.
@@ -153,6 +156,9 @@ User override:
 1. Carry over all data from the previous environment to the new image(s).
 2. Clean up only older unused images related to the requested environment.
 3. Do not touch containers outside the relevant environment(s).
+4. After a requested Agentspine image pull succeeds, if the user's intent is to run or update that environment and they did not explicitly limit the task to "pull only", automatically create or start the matching fresh container stack alongside existing environments.
+5. Start required companion services for that stack too, such as the Kokoro worker sidecar for the standard-pre deployment path, unless the user explicitly asks to skip them.
+6. Prefer the repo's standard Compose or service definitions for that deployment path, and publish the resulting URL/port details in the final handoff.
 
 **Protected existing containers and name-conflict habits**
 1. When the user names a container, image ID, long hash, port, or existing environment, treat that exact object as protected. Inspect it first, and do not stop, restart, rename, recreate, remove, or rebuild it unless the user explicitly targets that object or asks for a restore/repair of it.
@@ -162,6 +168,7 @@ User override:
 5. If localhost stops loading, inspect container metadata, image presence, logs, process state, listening sockets, and port mappings before assuming the image is missing or recreating the environment. Prefer the smallest repair, such as restarting the failed in-container service, and only restart the whole target container when the user has asked to restore that target.
 6. If restoring one environment would require stopping, renaming, recreating, or removing a sibling container, ask the user first. Preserve long-running user containers even when their names are inconvenient.
 7. When starting a GPU image for user testing, keep the standard container untouched, publish the chosen URL/port, and mention any port/name difference from previous containers.
+
 ---
 
 ## Documentation & Roadmap Alignment
@@ -184,13 +191,10 @@ When preparing or baking the Agentspine v0.9.9-pre line, follow these rules unle
 - Treat `C:\agent-zero-v099pre-target` and the running `agentspine-v099pre-target` container as the source of truth until the hotpatch branch is merged.
 - Bake from the hotpatched target tree, not from the older `C:\agent-zero` checkout, when the user references the v0.9.9-pre target container.
 - Preserve `.git` in the baked source so `/a0` is a real Git worktree. Verify `git describe --tags --always`, `git rev-parse`, branch detection, and self-update version detection inside the rebuilt container.
-- Set the baked `/a0` Git origin to `https://github.com/Omni-NexusAI/agent-zero.git` for this release path.
+- Set the baked `/a0` Git origin to `https://github.com/Omni-NexusAI/agentspine.git` for this release path.
 - Keep Agentspine-specific behavior in built-in overlay plugins whenever possible. The preserved overlay set for self-update compatibility is `_agentspine_identity`, `_enhanced_speech`, `_enhanced_mcp_config`, and `_multi_source_updater`.
 - Do not include `plugins_custom/*` or runtime marketplace installs under `usr/plugins/*` in release images.
 - Use visible banner prefix `D` for development/pre builds and reserve `M` for main/full release builds. For v0.9.9-pre standard builds, the banner should render as `D v0.9.9-standard-pre <timestamp>`.
 - Do not bake `_provider_profiles` as a built-in plugin. Provider/model profile restore behavior belongs in `_model_config` and must preserve provider model, API base, and context length.
 - Treat the main Agentspine image and Kokoro worker image as separate artifacts. Verify the worker sidecar and remote TTS discovery before release promotion.
 - Do not push GHCR images until the corrected local image and sidecar stack pass verification and the user approves promotion.
-
-
-

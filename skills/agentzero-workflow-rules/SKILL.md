@@ -1,10 +1,7 @@
 ---
 name: agentzero-workflow-rules
-version: 1.0.0
-author: Omni-NexusAI
 description: "Archived project-specific workflow rules retained for historical reference. Do not use for new work; use agent-workflow-rules instead."
 allowed-tools: Read Write Edit Glob Grep Bash
-user-invocable: true
 ---
 # Archived: Agentspine Workflow Rules
 

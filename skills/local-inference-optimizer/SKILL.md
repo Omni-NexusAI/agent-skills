@@ -18,9 +18,22 @@ This monorepo skill is the maintained source of truth.
 - User cares about **vision, audio, or other modalities**: verify capabilities and re-benchmark with representative inputs.
 - Tuning should leverage **external tester evidence** without skipping local validation.
 
+## Configuration intake (required before any sweeping)
+
+Before running any test, sweep, or launcher write, you **must** confirm the configuration with the user. Do not infer or silently default. Present recommended defaults as explicit options and require confirmation for each item.
+
+Required intake checklist (all must be resolved before Round 0):
+1. **Primary goal** — explicitly `balance`, `performance`, or `capacity` (see Optimization goals below). Do not assume.
+2. **VRAM cap T** and **hardware envelope** — the GiB ceiling and which GPU(s) / machine the server runs on.
+3. **Modalities in scope** — text-only, vision, audio; and whether an `--mmproj` (or equivalent) path is available.
+4. **Model-launcher target** — where/how to emit the launcher (a `configs` entry in `llama-server-launcher/llama_cpp_launcher_configs.json`, or a standalone `run_*.sh/.bat`), and the naming scheme to use (see Model-launcher naming convention).
+5. **Agent / Web UI in scope** — whether an agent framework or Web UI is in play (drives the Test B method).
+
+If the user says "just decide", pick the recommended default for each unresolved item and **record the choices explicitly in the run notes**. Never auto-default without surfacing them.
+
 ## Optimization goals (pick explicitly)
 
-Ask or infer which **primary goal** applies; secondary goals are constraints.
+Confirm the **primary goal** with the user during intake (see Configuration intake); secondary goals are constraints. Do not infer it silently.
 
 | Goal | User intent | Typical trade-offs | What to maximize / watch |
 |------|-------------|--------------------|-------------------------|
@@ -34,7 +47,7 @@ Ask or infer which **primary goal** applies; secondary goals are constraints.
 - **Performance** prioritizes **timings over VRAM fill**; undertuning VRAM is acceptable if documented.
 - **Capacity** prioritizes **`ctx-size` / `--fit` / reasoning** and client alignment; may sacrifice peak t/s.
 
-If the user does not state a goal, **default to balance** and state that assumption in notes.
+Goal must be set during the Configuration intake gate. Silent defaulting is not allowed; if the user delegates the choice, record the selected goal explicitly in notes.
 
 ## Decision gates (required before sweeping)
 
@@ -208,6 +221,10 @@ Bail or rollback when:
 
 Use the **same** checks each iteration so results are comparable. **Weight metrics by the active goal** (see **Optimization goals** above): e.g. **performance** cares most about `prompt_ms` and `predicted_per_second`; **capacity** cares about successful long contexts, reasoning, and modality requests without OOM; **balance** requires both to be acceptable.
 
+### Server lifecycle (teardown required)
+
+Each candidate runs against a **fresh** llama-server. After finishing Test A and Test B for a candidate, you **must terminate the server** (stop the process / free the port and GPU memory) before launching the next candidate or declaring done. Do not leave servers running between candidates: a leftover process holds VRAM and will corrupt `nvidia-smi` peak readings and `n_ctx` probes on the next run. Confirm the port is free and VRAM is released before proceeding.
+
 ### Why two test surfaces
 
 Tuning for **one** scenario (e.g. single clean-slate chat) can hide problems that appear under real workloads. Two complementary surfaces catch both ends:
@@ -294,13 +311,72 @@ For each candidate run, record at minimum:
 - **Only Test A** and declaring done—**Test B** still required for load and contention (**Repeatable test harness** above).
 - Skipping Test B because "no agent is available"—use **concurrent API / multiple Web UI chats**.
 
+## Model-launcher naming convention
+
+The launcher is the artifact the user actually runs. In this repo it lives as a `configs` entry in `llama-server-launcher/llama_cpp_launcher_configs.json` (consumed by `llamacpp-server-launcher.py`); the entry **key is the model-launcher name**. Standalone setups use a `run_*.sh/.bat` script instead.
+
+**Standard scheme (keep it short and self-describing):**
+
+    <ModelName>_<goal>
+
+- `goal` is one of `performance`, `capacity`, `balance` (matches the primary goal).
+- Examples: `Qwen35_A3B_performance`, `Gemma4_26b_capacity`, `Qwen3.6-27B_balance`.
+- During tuning, evaluate a **recommended + fallback** candidate pair (recorded in the run ledger). Retain only the agreed single production launcher per Launcher retention & cleanup — do not leave the `_fallback` behind unless the user asks.
+
+Portable fallback (no GUI launcher): `run_<ModelName>_<goal>.sh` / `.bat` with all flags explicit.
+
+**Legacy / non-standard:** older verbose keys such as `Qwen3.6-27B-...-Q3_K_M_kv=q4_0_vv=q8_0_th=8_tb=16_b=2048_ub=10` encode params in the name. Prefer the short `<ModelName>_<goal>` form going forward; migrate when convenient.
+
+## Recommended sampling defaults
+
+The launcher must ship with an explicit, reproducible sampling block. Include these recommended defaults unless the model/goal requires otherwise (then document the deviation in the run ledger):
+
+- `--temp 0.7`
+- `--top-p 0.9`
+- `--top-k 40`
+- `--min-p 0.05`
+- `--repeat-penalty 1.1`
+
+These are starting values, not sacred; per-architecture quirks (e.g. reasoning models that prefer low temp) override them. Always record the final sampling flags in the launcher and run ledger.
+
+## Completion gate (do not finish until all pass)
+
+This is a **hard stop**, not advice. Do not emit the final launcher(s) or summary until **every** item is satisfied:
+
+- **Test A** recorded: short + medium (long if capacity/long-context; modality test if vision/audio in scope).
+- **Test B** executed: real agent framework OR 2–4 simulated concurrent chats; peak VRAM sampled during the burst.
+- **Server terminated** after tests (see Server lifecycle).
+- **Run ledger** complete for every candidate with no missing required fields; promotion decision recorded.
+- **Launcher(s)** written with all flags explicit — including `--reasoning`, `--mmproj` (if used), `--cache-ram` (if tuned), and the **sampling defaults** above — and named per the Model-launcher naming convention.
+- **Anti-pattern** checks performed and signed off.
+- **Knowledge consolidated** into the Obsidian wiki (when reachable) and `llama-server-launcher/PROFILES.md`.
+- **Trial launchers pruned**; only the one agreed production launcher remains (see Launcher retention & cleanup).
+
+If any item fails, return to the relevant tuning round. Never declare done with gaps.
+
+## Knowledge consolidation (required)
+
+The durable record of a tuning run is **knowledge, not the trial launchers**. After the completion gate passes, write the result up before pruning launchers:
+
+- **Obsidian wiki (primary when the vault is reachable):** update `wiki/concepts/llama.cpp Local Inference.md`, adding or updating an entry under its existing **Optimized Models** table — match its format (model, goal, Recommended/Capacity rows with quant, ngl, n-cpu-moe, ctx, speed, reasoning, sampling, KV cache, notes). Also touch `wiki/index.md` (new entity if needed), `wiki/hot.md` (one-liner), and append `wiki/log.md`. Skip this step if the vault path is unknown/unavailable.
+- **Portable reference doc (always):** write or update `llama-server-launcher/PROFILES.md` with the same structure. This is the fallback for machines without the vault (e.g. a desktop hermes setup).
+- The note must capture: the final production launcher name (per the Model-launcher naming convention), key metrics, a run-ledger excerpt, rejected candidates and why (evidence summary), and any non-obvious findings.
+
+## Launcher retention & cleanup (required)
+
+At the end of a run, decide with the user which launcher is the **single production launcher** (default: the recommended profile).
+
+- **Prune all trial launchers:** remove their entries from `llama_cpp_launcher_configs.json` (the `configs` object), keeping only the one retained launcher. If standalone `.ps1` / `.bat` / `.sh` scripts were used, delete the trial scripts and keep only the production one.
+- The `_fallback` launcher is **not** retained by default; its parameters live on in PROFILES.md / the wiki note, so nothing is lost. Regenerate it later if the user asks.
+- Run one final smoke **Test A** on the retained launcher to confirm it loads cleanly before sign-off.
+
 ## Outputs
 
 After tuning, leave:
 
-- Executable **launcher** with all flags explicit (**reasoning**, **mmproj** if used, **cache-ram** if tuned).
+- The single retained **production launcher** with all flags explicit (**reasoning**, **mmproj** if used, **cache-ram** if tuned, **sampling defaults**), named per the Model-launcher naming convention. All other trial launchers are pruned (see Launcher retention & cleanup).
 - **Stated optimization goal** and **which modalities** were validated.
-- **Two final candidates**: recommended profile + one fallback profile.
+- **Two candidate profiles recorded in the ledger** (recommended + fallback) for analysis and future regeneration; only the agreed single production launcher is retained as an artifact.
 - **One paragraph**: t/s and/or latency (performance), **n_ctx** and long-context behavior (capacity), VRAM band and caveats (balance).
 - **Evidence summary**: why the winner won (round-by-round) and what was rejected.
 - **Run ledger excerpt** with confidence and promotion decision.

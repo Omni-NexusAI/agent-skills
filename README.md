@@ -7,6 +7,7 @@
 | Skill | Directory | Description | Platform | Status |
 |---|---|---|---|---|
 | **Agent Workflow Rules** | `skills/agent-workflow-rules/` | Project-neutral engineering workflow, safety, delivery, and verification rules | Agent/Any | Active |
+| **DOX** | `skills/dox/` | Self-documenting AGENTS.md hierarchy with ambient read-before-edit and update-after-edit contracts | Agent/Any | Active |
 | **Cursor Workflow Rules** | `skills/cursor-workflow-rules/` | Legacy platform-specific workflow rules | Cursor | Archived |
 | **AgentZero Workflow Rules** | `skills/agentzero-workflow-rules/` | Legacy project-specific workflow rules | Agent Zero | Archived |
 | **SimpleMem** | `skills/simplemem/` | Local memory storage with key-value persistence | OpenClaw | ✅ Stable |
@@ -27,6 +28,7 @@ agent-skills/
     ├── voice-messaging/         # Voice Messaging skill
     ├── initializer/             # Initializer skill
     ├── mcp-bridge/              # MCP Bridge server
+    ├── dox/                     # AGENTS.md hierarchy framework
     ├── local-inference-optimizer/  # Inference Optimizer skill
     └── docker-cleanup/          # Docker cleanup skill
 ```

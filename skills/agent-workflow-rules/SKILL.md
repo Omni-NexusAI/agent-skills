@@ -83,6 +83,9 @@ For repositories with a remote collaboration workflow:
 ## Documentation continuity
 
 1. Read the applicable repository instruction hierarchy before editing.
-2. Update durable documentation when changes alter structure, contracts, workflows, ownership, operation, or verification.
-3. Keep documentation concise and current; record stable intent rather than task history.
+2. Write the GitHub repository description and README introduction for the person deciding whether to use the project, not for someone already developing it. For the short GitHub description, name the user-facing product or workflow, its main outcome, and a meaningful differentiator in one plain-language sentence. Lead the README with what it enables, who it is for, and the practical outcome; introduce internal architecture, implementation history, and maintenance details only when they help that reader get started or make an informed choice.
+3. Treat the repository front page as product-facing onboarding: make the first screen understandable without prior project context, define unavoidable technical terms in plain language, and state important capabilities and limits truthfully.
+4. Structure README content in reader order: purpose and outcome, key user-visible capabilities, the quickest supported way to try it, then installation, configuration, operational detail, API/reference material, development, and contribution guidance as applicable.
+5. Before finalizing documentation, perform a newcomer read-through: verify that a prospective user can answer "What is this?", "What can it do for me?", "Is it suitable for my use case?", and "How do I begin?" without needing to inspect source code or infer developer jargon.
+6. Keep documentation concise and current; record stable intent rather than task history. Do not overstate experimental, scaffolded, unavailable, or developer-only functionality.
 

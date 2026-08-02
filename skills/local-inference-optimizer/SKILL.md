@@ -184,6 +184,28 @@ llama-server can cap **host DRAM** used for a **RAM-resident prompt / checkpoint
 
 After changing `-cram`, re-run a short **Test A** on workloads that repeat system/tool prefixes (agents) to see if prefill latency improves without exceeding host RAM budget.
 
+### 7. Batch-eval sweep procedure
+
+`--batch-size` and `--ubatch-size` directly affect prefill throughput, decode latency, and VRAM pressure. Treat batch as a first-class sweep dimension, not a "tune later" afterthought — especially for MoE models where batch size interacts with expert dispatch across GPU/CPU.
+
+**Sweep procedure:**
+
+1. Sweep `--batch-size` across [256, 512, 1024, 2048, 4096, 8192] at each candidate `-ngl` / `n-cpu-moe` setting (MoE) or at the chosen `-ngl` (dense).
+2. For each batch value, set `--ubatch-size` proportionally: `batch / 4` or `batch / 8`, minimum 64.
+3. Record `prompt_ms`, `predicted_per_second`, and VRAM at each step on the same medium benchmark prompt (add multimodal prompt if vision/audio in scope).
+4. At each step, verify the model loads and generates without OOM before recording timing.
+
+**Goal-aware interpretation:**
+
+- **Performance**: if prefill latency drops (faster) but decode t/s plateaus, stop — smaller batches are already optimal for latency. Do not push batch higher if it only increases VRAM without improving decode.
+- **Balance**: raise batch until VRAM hits the **\[T−1, T\]** band. If decode t/s degrades before VRAM is full, stop — throughput has peaked.
+- **Capacity**: use the batch value that fits at the target `ctx-size` and reasoning setting. If a larger batch prevents the model from loading at the target ctx, shrink batch first before reducing ctx.
+
+**Dense vs MoE difference:**
+
+- **Dense**: batch mostly affects prefill speed. A single sweep at the final `-ngl` is usually sufficient.
+- **MoE**: batch changes the compute ratio between dense layers (prefill, attention) and expert dispatch (CPU/GPU split). Repeat the batch sweep at each candidate `-ngl` / `n-cpu-moe` pair — the sweet spot shifts with the offload/expert balance.
+
 ## External evidence policy (autoresearch-inspired)
 
 Before broad sweeps, run a targeted evidence pass:
@@ -216,6 +238,27 @@ Bail or rollback when:
 - instability repeats,
 - gains are not reproducible,
 - constraints are violated (VRAM cap, latency limits, context requirements).
+
+### Sweep intelligence (educated early termination)
+
+Within a single sweep axis (e.g. sweeping `-ngl`, `n-cpu-moe`, or `--batch-size`), the agent may terminate the remaining unrun parameter combinations early when the trend is clear. This saves time without sacrificing correctness.
+
+**Trigger rule:**
+If the agent observes **monotonic degradation** in the goal-weighted primary metric across **3 or more consecutive parameter steps**, terminate the remaining combinations in that sweep axis and proceed to the next parameter family or candidate.
+
+**Goal-aware triggers:**
+
+| Goal | Primary metric | Degradation signal | Early-stop action |
+|------|----------------|--------------------|--------------------|
+| **Performance** | `predicted_per_second` | 3 consecutive t/s drops from the peak | Stop remaining steps in this batch / ngl / n-cpu-moe sweep; revert to the best step seen |
+| **Balance** | VRAM + `predicted_per_second` | 3 consecutive VRAM increases toward T **or** 2 consecutive t/s drops while VRAM is still under T | Stop — the edge is found at the best step; document the ceiling |
+| **Capacity** | Load success + `n_ctx` | 2 consecutive OOM or fit failures | Stop immediately — capacity limit is exceeded; use the last successful step |
+
+**Recording:**
+Document every early termination in the run ledger: which axis was terminated, the observed trend (metric values at each step), and the step that was selected as the best. Do not silently skip steps.
+
+**Overrides:**
+The user can disable early termination for a given sweep if they want exhaustive data. Respect an explicit "sweep all" instruction.
 
 ## Repeatable test harness
 
@@ -310,6 +353,10 @@ For each candidate run, record at minimum:
 - Setting agent framework context **above** server **`n_ctx`** or ignoring **system prompt size** vs context.
 - **Only Test A** and declaring done—**Test B** still required for load and contention (**Repeatable test harness** above).
 - Skipping Test B because "no agent is available"—use **concurrent API / multiple Web UI chats**.
+- Tuning `--batch-size` as an afterthought rather than a first-class sweep dimension alongside ngl and n-cpu-moe; especially detrimental for MoE architectures.
+- For MoE: picking `--batch-size` without re-sweeping at each ngl/n-cpu-moe candidate — the sweet spot shifts with the offload/expert balance.
+- Completing every parameter combination in a sweep despite clear monotonic performance degradation — wastes cycles that could go to the next candidate.
+- For **performance** sweeps: continuing a batch or ngl sweep after 3+ consecutive t/s drops instead of terminating early at the best step.
 
 ## Model-launcher naming convention
 

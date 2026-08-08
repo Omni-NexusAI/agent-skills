@@ -1,0 +1,41 @@
+# Example learner profile. Copy and customize as needed.
+
+support_language: English
+interaction_style: scenario_conversation_with_on_demand_breakdowns
+
+languages:
+  Spanish:
+    starting_level: beginner
+    primary_focus:
+      - speaking
+      - vocabulary
+    secondary_focus:
+      - grammar
+    initial_pace: slow-adaptive
+    correction_intensity: normal
+    notes:
+      - Prefer common everyday vocabulary first.
+      - Increase target-language share as comprehension improves.
+
+  Japanese:
+    starting_level: lower-intermediate
+    primary_focus:
+      - speaking
+      - vocabulary
+    secondary_focus:
+      - grammar
+    initial_pace: slow-adaptive
+    correction_intensity: normal
+    notes:
+      - Prefer natural conversational phrasing over literal translation.
+      - Use English only as much as needed to unblock the learner.
+
+global_preferences:
+  scenario_first: true
+  start_with_brief_support_language_setup: true
+  return_to_last_turn_after_breakdown: true
+  quick_word_assist_should_be_brief: true
+  deep_breakdown_available_on_demand: true
+  increase_target_language_share_with_mastery: true
+  increase_speaking_speed_with_mastery: true
+  avoid_overcorrecting: true

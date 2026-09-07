@@ -9,6 +9,7 @@
       "id": "reviewed-example-only",
       "action": "move",
       "target": "E:\\agent-work\\disposable-build-output",
+      "destination": "E:\\agent-work\\relocated\\disposable-build-output",
       "agent_owned": true,
       "positively_disposable": true,
       "recovery_retained": true,

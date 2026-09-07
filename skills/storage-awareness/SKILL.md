@@ -24,7 +24,9 @@ lock all make mutation ineligible. Observation is not authority.
 Before any storage-producing operation, run `scripts/storage_guard.py preflight`
 for every affected volume. The default reserve is `max(20 GiB, 5% capacity)` plus
 `estimated_peak_growth * 1.25`. An unknown expensive peak defers that operation.
-Recheck before each safe boundary and after failure or a cross-volume stage.
+For a multi-step write or move, create a private per-volume reservation first,
+then run a fresh `checkpoint` at each safe boundary. Reservation state or policy
+state that is missing, stale, corrupt, or locked makes mutation ineligible.
 
 ## Policy-map contract
 
@@ -46,11 +48,17 @@ history/recovery retained. Existing applications and personal data always need a
 concrete reviewed target action. Acquire a per-volume lock and recheck policy,
 path identity, capacity, and grant immediately before action.
 
-For cross-volume relocation, budget peak duplicate storage. Copy, hash-verify,
-switch configuration, smoke-test, then delete the original only after all checks
-pass; retain rollback until the new location is proven. Pause/resume only jobs
-owned by this workflow and only at known safe boundaries—never arbitrary
-processes.
+For cross-volume relocation, budget peak duplicate storage. The executable helper
+handles one regular, unlinked file with an exact source-and-destination move grant:
+`stage-relocation` copies, hash-verifies, persists a transaction, and retains the
+source. A separate reviewed `record-relocation-disposition` step records config and
+smoke outcomes; only `finalize-relocation` may delete the source, and only when both
+are `passed`. Any other disposition retains both source and verified staged copy.
+Application-specific configuration switching
+and smoke tests are explicit reviewed adapters, not automated by this helper.
+Directory moves, arbitrary process control, and existing app/person data remain
+reviewed workflows. Pause/resume only jobs owned by this workflow and only at known
+safe boundaries—never arbitrary processes.
 
 ## Audit output
 
@@ -67,10 +75,15 @@ default.
 ```powershell
 python scripts/storage_guard.py validate-map --map C:\private\storage-policy.json
 python scripts/storage_guard.py preflight --path E:\work --estimated-peak-bytes 2147483648
+python scripts/storage_guard.py reserve --map C:\private\storage-policy.json --path E:\work --reservation-id build-42 --estimated-peak-bytes 2147483648
+python scripts/storage_guard.py checkpoint --map C:\private\storage-policy.json --path E:\work --reservation-id build-42 --estimated-peak-bytes 2147483648
 python scripts/storage_guard.py audit-inventory --input inventory.json --output normalized.json
 python -m unittest discover -s tests -v
 ```
 
-The helper is a gate and audit normalizer, not a deletion tool. Record each
-reviewed operation in the private ledger with evidence, outcome, and rollback
-state.
+`delete-owned` is deliberately limited to one exact, positively disposable,
+agent-owned regular file with a live delete grant. `stage-relocation` requires a
+prior reservation and exact move grant; release the reservation only after the
+transaction's recovery disposition is recorded. Private JSONL ledger records are
+append-only evidence, not authority. These commands are not a general cleanup
+tool.

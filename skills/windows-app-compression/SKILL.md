@@ -19,7 +19,8 @@ existing apps and runtimes.
 ## Boundaries
 
 Hard-exclude model weights, checkpoints, model caches, and linked aliases
-(including hardlinks) when content or identity is uncertain. Exclude VHDX,
+(including hardlinks) unconditionally; uncertainty is also exclusion, never a
+reason to proceed. Exclude VHDX,
 Docker, and WSL compaction: route those to the Docker specialist. Never compress
 an entire Pinokio installation; assess one concrete app/runtime subfolder.
 

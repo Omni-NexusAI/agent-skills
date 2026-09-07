@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-01-01T00:00:00Z",
+  "max_age_seconds": 3600,
+  "protected_paths": ["C:\\private\\never-delete"],
+  "approved_roots": ["E:\\agent-work"],
+  "action_grants": [
+    {
+      "id": "reviewed-example-only",
+      "action": "move",
+      "target": "E:\\agent-work\\disposable-build-output",
+      "agent_owned": true,
+      "positively_disposable": true,
+      "recovery_retained": true,
+      "allowed_extensions": [".tmp"],
+      "expires_at": "2026-01-01T01:00:00Z"
+    }
+  ],
+  "reservations": {"default_min_bytes": 21474836480, "default_percent": 0.05}
+}

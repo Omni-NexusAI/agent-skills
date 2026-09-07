@@ -31,6 +31,10 @@ Thumbs.db
 .env.local
 *.log
 
+# Agent scratch artifacts (audits, drafts, and test evidence)
+.claude/.scratch/
+.storage-awareness/
+
 # Test
 .pytest_cache/
 .coverage

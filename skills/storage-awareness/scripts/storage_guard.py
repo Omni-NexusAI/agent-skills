@@ -138,6 +138,24 @@ def preflight(path, peak, policy=None):
     reserve = max(int(minimum), int(usage.total * float(percent)))
     required = reserve + int(peak * 1.25)
     return {"path": canon(path), "total_bytes": usage.total, "free_bytes": usage.free, "reserve_bytes": reserve, "estimated_peak_bytes": peak, "required_free_bytes": required, "allowed": usage.free > required}
+def runtime_root(): return Path.home()/".storage-awareness"
+def journal(event, payload, ledger=None):
+    target=Path(ledger) if ledger else runtime_root()/"ledger.jsonl"
+    target.parent.mkdir(parents=True,exist_ok=True)
+    with target.open("a",encoding="utf-8") as f: f.write(json.dumps({"at":now().isoformat(),"event":event,**payload})+"\n")
+def checkpoint(map_path,path,peak,lock_directory,ledger=None):
+    target=absolute_path(path)
+    with volume_lock(Path(target).anchor,lock_directory):
+        policy=load_map(map_path); result=preflight(target,peak,policy); journal("capacity-checkpoint",result,ledger); return result
+def delete_owned(map_path,path,grant_id,peak,lock_directory,ledger=None):
+    raw=Path(path)
+    if is_reparse_point(raw) or not raw.is_file(): raise PolicyError("delete target must be a regular file")
+    target=absolute_path(raw)
+    with volume_lock(raw.anchor,lock_directory):
+        policy=load_map(map_path); find_grant(target,"delete",policy,grant_id)
+        capacity=preflight(raw.parent,peak,policy)
+        if raw.stat().st_nlink>1 or not capacity["allowed"]: raise PolicyError("delete target fails safe-boundary gate")
+        raw.unlink(); journal("owned-delete",{"target":target,"grant_id":grant_id,"outcome":"deleted"},ledger); return {"deleted":target}
 def value(item, snake, camel, default=None): return item.get(snake, item.get(camel, default))
 def normalized_item(item, hardlink_evidence=()):
     path = item.get("path") or item.get("exact_path") or ""
@@ -162,6 +180,8 @@ def main():
     q=sub.add_parser("preflight"); q.add_argument("--path", required=True); q.add_argument("--estimated-peak-bytes", type=int, required=True); q.add_argument("--map")
     q=sub.add_parser("check-mutation"); q.add_argument("--map", required=True); q.add_argument("--path", required=True); q.add_argument("--action", choices=("delete","move"), required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(Path.home()/".storage-awareness"/"locks")); q.add_argument("--grant-id")
     q=sub.add_parser("audit-inventory"); q.add_argument("--input", required=True); q.add_argument("--output", required=True)
+    q=sub.add_parser("checkpoint"); q.add_argument("--map",required=True); q.add_argument("--path",required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--ledger")
+    q=sub.add_parser("delete-owned"); q.add_argument("--map",required=True); q.add_argument("--path",required=True); q.add_argument("--grant-id",required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--ledger")
     a=p.parse_args()
     try:
         if a.cmd == "validate-map": result={"valid": True, "schema_version": load_map(a.map)["schema_version"]}
@@ -175,6 +195,8 @@ def main():
                 if Path(target).is_dir() and tree_issues(target,policy): raise PolicyError("recursive target contains unsafe descendants")
                 if Path(target).is_file() and Path(target).stat().st_nlink > 1: raise PolicyError("hardlink target requires separate review")
                 result={"allowed":True,"grant_id":grant_id,"capacity":capacity}
+        elif a.cmd == "checkpoint": result=checkpoint(a.map,a.path,a.estimated_peak_bytes,a.lock_directory,a.ledger)
+        elif a.cmd == "delete-owned": result=delete_owned(a.map,a.path,a.grant_id,a.estimated_peak_bytes,a.lock_directory,a.ledger)
         else:
             raw=json.loads(Path(a.input).read_text(encoding="utf-8")); items=raw.get("items", raw if isinstance(raw,list) else [])
             if not isinstance(items,list): raise PolicyError("inventory items must be a list")

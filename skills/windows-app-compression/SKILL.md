@@ -34,10 +34,18 @@ bounded test, and application smoke checks. No blanket compression or deletion.
 1. Run the shared storage preflight and validate a fresh private map.
 2. Run `scripts/windows_app_compression.py analyze` for the exact subfolder.
 3. Review exclusions, dependencies, current state, estimate confidence, and a
-   concrete rollback/smoke plan with the user.
-4. Only then run `execute` with an exact compression grant. Recheck immediately
+   concrete rollback/smoke plan. Reuse an already live exact approval; ask the
+   user only if the target, scope, rollback, or other consequential evidence has
+   changed.
+4. Run `execute` only with that exact compression grant. Recheck immediately
    before action, make a bounded test first, smoke the affected app, and log
-   actual before/after allocation. On a failure, stop—do not broaden scope.
+   actual before/after allocation. On a failure, stop only that target—do not
+   broaden scope.
+
+The shared capacity result is per target volume: a soft-reserve `warning` does
+not pause unrelated work or invalidate an already exact, bounded grant; a hard
+`defer` stops only this compression target. Do not add a separate Docker/WSL
+pause policy here.
 
 ```powershell
 python scripts/windows_app_compression.py analyze --target C:\App\runtime --storage-awareness-path ..\storage-awareness

@@ -17,24 +17,46 @@ state, never committed to this skill.
 
 ## Default posture
 
-Start with an audit. **KEEP** is the default; missing evidence, stale/corrupt
-state, unknown growth, aliases, hardlinks, protection matches, or an unavailable
-lock all make mutation ineligible. Observation is not authority.
+Start with an audit. **KEEP** is the default for existing data; missing evidence,
+aliases, hardlinks, protection matches, or an unavailable lock make a mutation
+ineligible. Observation is not authority. Capacity pressure on one volume is not
+authority to stop unrelated read-only work, planning, or writes on another volume.
 
-Before any storage-producing operation, run `scripts/storage_guard.py preflight`
-for every affected volume. The default reserve is `max(20 GiB, 5% capacity)` plus
-`estimated_peak_growth * 1.25`. An unknown expensive peak defers that operation.
-For a multi-step write or move, create a private per-volume reservation first,
-then run a fresh `checkpoint` at each safe boundary. Reservation state or policy
-state that is missing, stale, corrupt, or locked makes mutation ineligible.
+Before a storage-producing operation, budget the actual peak growth on its target
+volume, including the configurable 25% overhead and active reservations. The
+default `max(20 GiB, 5% capacity)` is a **soft operating reserve**, not a blanket
+project pause. The helper also keeps a smaller configurable hard emergency margin
+(default `max(1 GiB, 1%)`):
+
+- `ready`: the write preserves the soft reserve; reserve and continue.
+- `warning`: the bounded write fits above the hard margin but crosses the soft
+  reserve. Continue the affected bounded work if needed, preferably route new
+  scratch/download/extract/build/cache staging to a `ready` approved write root.
+- `defer`: the target volume cannot safely cover active reservations plus the
+  proposed peak and hard margin. Defer only that write; continue unrelated work
+  and inspect approved alternatives.
+
+For an unknown peak, use a bounded probe or estimator—not an indefinite pause—and
+then reserve the measured target volume. A multi-step write or move still requires
+a private per-volume reservation and fresh `checkpoint` at each safe boundary.
+Missing, stale, corrupt, or locked state blocks the destructive/finalization action
+that depends on it; it does not halt independent low-write investigation.
+
+Use `plan-write` before creating new task-owned staging. It is read-only and only
+selects existing `write_roots` explicitly approved for the requested purpose. It
+never moves applications, changes global `TEMP`/cache variables, or changes an app
+configuration. Apply tool-supported per-task temp/cache arguments only after a
+fresh reservation succeeds.
 
 ## Policy-map contract
 
 Begin from `templates/policy-map.example.json`; keep the real map private. It
 defines protected paths, approved roots, exact action grants, artifact ownership,
-volume reservations, and a freshness limit. Run `validate-map` before any
-mutation. A map must be fresh, valid JSON, and schema version 1. Protection
-overrides every grant. Do not remove a user protection without explicit approval.
+volume reservations, and a freshness limit. Its timestamps are deliberately
+expired placeholders: replace `generated_at` and every grant `expires_at` when
+instantiating a private map. Run `validate-map` before any mutation. A map must be
+fresh, valid JSON, and schema version 1. Protection overrides every grant. Do not
+remove a user protection without explicit approval.
 
 Use normalized resolved paths. Treat junctions, symlinks, and hardlink aliases as
 the same protected object; if identity cannot be established, keep it. An
@@ -57,8 +79,12 @@ are `passed`. Any other disposition retains both source and verified staged copy
 Application-specific configuration switching
 and smoke tests are explicit reviewed adapters, not automated by this helper.
 Directory moves, arbitrary process control, and existing app/person data remain
-reviewed workflows. Pause/resume only jobs owned by this workflow and only at known
-safe boundaries—never arbitrary processes.
+reviewed workflows. Do not pause arbitrary processes. A bounded inventory or
+planning subagent may keep searching approved alternatives while the affected
+write waits under shared reservation accounting.
+
+Docker/WSL lifecycle remains owned by the Docker specialist. Do not duplicate its
+shutdown, pause, or VHDX-compaction policy here.
 
 ## Audit output
 
@@ -75,6 +101,7 @@ default.
 ```powershell
 python scripts/storage_guard.py validate-map --map C:\private\storage-policy.json
 python scripts/storage_guard.py preflight --path E:\work --estimated-peak-bytes 2147483648
+python scripts/storage_guard.py plan-write --map C:\private\storage-policy.json --path C:\agent-work --purpose build --estimated-peak-bytes 2147483648 --candidate-path E:\agent-work
 python scripts/storage_guard.py reserve --map C:\private\storage-policy.json --path E:\work --reservation-id build-42 --estimated-peak-bytes 2147483648
 python scripts/storage_guard.py checkpoint --map C:\private\storage-policy.json --path E:\work --reservation-id build-42 --estimated-peak-bytes 2147483648
 python scripts/storage_guard.py audit-inventory --input inventory.json --output normalized.json
@@ -84,6 +111,8 @@ python -m unittest discover -s tests -v
 `delete-owned` is deliberately limited to one exact, positively disposable,
 agent-owned regular file with a live delete grant. `stage-relocation` requires a
 prior reservation and exact move grant; release the reservation only after the
-transaction's recovery disposition is recorded. Private JSONL ledger records are
-append-only evidence, not authority. These commands are not a general cleanup
-tool.
+transaction's recovery disposition is recorded. A failing reviewed disposition
+retains both copies and releases only the future-growth reservation; a successful
+finalization deletes only the verified source and releases its reservation. Private
+JSONL ledger records are append-only evidence, not authority. These commands are
+not a general cleanup tool.

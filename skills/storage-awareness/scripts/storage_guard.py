@@ -6,6 +6,13 @@ from contextlib import contextmanager
 from pathlib import Path
 
 GiB = 1024 ** 3
+MiB = 1024 ** 2
+DEFAULT_SOFT_MIN_BYTES = 20 * GiB
+DEFAULT_SOFT_PERCENT = .05
+DEFAULT_HARD_MIN_BYTES = GiB
+DEFAULT_HARD_PERCENT = .01
+DEFAULT_PEAK_OVERHEAD_PERCENT = .25
+DEFAULT_PROBE_BYTES = 256 * MiB
 MODEL_SUFFIXES = (".gguf", ".safetensors", ".ckpt", ".pt", ".bin", ".pth", ".onnx", ".h5")
 MODEL_DIRS = ("checkpoint", "checkpoints", "model-cache", "model_cache", "huggingface", "hf-cache", "transformers", "models", "lm-studio", "lm_studio")
 TEXT_RUNTIME_SUFFIXES = {".py", ".js", ".txt"}
@@ -37,6 +44,13 @@ def load_map(filename):
     for key in ("protected_paths", "approved_roots", "action_grants"):
         if not isinstance(data.get(key, []), list): raise PolicyError(f"{key} must be a list")
     for path in data["protected_paths"] + data["approved_roots"]: absolute_path(path)
+    write_roots=data.get("write_roots",[])
+    if not isinstance(write_roots,list): raise PolicyError("write_roots must be a list")
+    for root in write_roots:
+        if not isinstance(root,dict): raise PolicyError("write root must be an object")
+        absolute_path(root.get("path"))
+        purposes=root.get("purposes")
+        if not isinstance(purposes,list) or not purposes or not all(p in {"scratch","download","extract","build","cache"} for p in purposes): raise PolicyError("write root needs supported nonempty purposes")
     ids=set()
     for grant in data["action_grants"]:
         if not isinstance(grant,dict) or not isinstance(grant.get("id"),str) or not grant["id"] or grant["id"] in ids: raise PolicyError("grant IDs must be unique and nonempty")
@@ -163,7 +177,7 @@ def copy_verify(source, destination, map_path, grant_id, estimated_peak_bytes, l
         else:
             reservations=load_reservations(state)
             entries=[x for x in reservation_entries(reservations,dst.parent) if x["id"] == reservation_id]
-            if len(entries) != 1 or entries[0]["bytes"] < int(math.ceil(effective_peak*1.25)): raise PolicyError("reservation missing or too small for copy")
+            if len(entries) != 1 or entries[0]["bytes"] < peak_reservation_bytes(effective_peak,policy): raise PolicyError("reservation missing or too small for copy")
             capacity=preflight(dst.parent,0,policy,reservation_total(reservations,dst.parent))
         if not capacity["allowed"]: raise PolicyError("destination capacity preflight failed")
         if dst.exists(): raise PolicyError("destination appeared during staging")
@@ -180,17 +194,88 @@ def copy_verify(source, destination, map_path, grant_id, estimated_peak_bytes, l
         if stage is not None and stage.exists(): stage.unlink()
         journal("copy-failed",{"source":str(src),"destination":str(dst),"error":str(e)},ledger)
         raise
+def reservation_settings(policy=None):
+    reservations = (policy or {}).get("reservations", {})
+    if not isinstance(reservations,dict): raise PolicyError("reservations must be an object")
+    values={
+        "soft_min_bytes":reservations.get("default_min_bytes",DEFAULT_SOFT_MIN_BYTES),
+        "soft_percent":reservations.get("default_percent",DEFAULT_SOFT_PERCENT),
+        "hard_min_bytes":reservations.get("hard_min_bytes",DEFAULT_HARD_MIN_BYTES),
+        "hard_percent":reservations.get("hard_percent",DEFAULT_HARD_PERCENT),
+        "peak_overhead_percent":reservations.get("peak_overhead_percent",DEFAULT_PEAK_OVERHEAD_PERCENT),
+        "default_probe_bytes":reservations.get("default_probe_bytes",DEFAULT_PROBE_BYTES),
+    }
+    for name,value in values.items():
+        if not isinstance(value,(int,float)) or not math.isfinite(value) or value < 0: raise PolicyError(f"reservation {name} must be finite and non-negative")
+    return values
+def peak_reservation_bytes(peak, policy=None):
+    if not isinstance(peak,int) or peak < 0: raise PolicyError("peak growth must be a known non-negative integer")
+    return int(math.ceil(peak * (1 + reservation_settings(policy)["peak_overhead_percent"])))
 def preflight(path, peak, policy=None, reserved_bytes=0):
     if peak is None or not isinstance(peak,int) or peak < 0: raise PolicyError("peak growth must be a known non-negative integer")
     if not isinstance(reserved_bytes,int) or reserved_bytes < 0: raise PolicyError("reserved bytes must be a known non-negative integer")
     usage = shutil.disk_usage(path)
-    reservations = (policy or {}).get("reservations", {})
-    minimum=reservations.get("default_min_bytes",20*GiB); percent=reservations.get("default_percent",.05)
-    if not isinstance(minimum,(int,float)) or not isinstance(percent,(int,float)) or minimum<0 or percent<0: raise PolicyError("reservation values must be finite and non-negative")
-    reserve = max(int(minimum), int(usage.total * float(percent)))
-    peak_reservation = int(math.ceil(peak * 1.25))
-    required = reserve + reserved_bytes + peak_reservation
-    return {"path": canon(path), "total_bytes": usage.total, "free_bytes": usage.free, "reserve_bytes": reserve, "active_reservation_bytes": reserved_bytes, "estimated_peak_bytes": peak, "peak_reservation_bytes": peak_reservation, "required_free_bytes": required, "allowed": usage.free > required}
+    settings=reservation_settings(policy)
+    soft_reserve=max(int(settings["soft_min_bytes"]),int(usage.total * settings["soft_percent"]))
+    hard_reserve=max(int(settings["hard_min_bytes"]),int(usage.total * settings["hard_percent"]))
+    peak_reservation=peak_reservation_bytes(peak,policy)
+    hard_required=hard_reserve + reserved_bytes + peak_reservation
+    soft_required=soft_reserve + reserved_bytes + peak_reservation
+    if usage.free <= hard_required: status,warning="defer","hard operational headroom cannot cover active reservations and this write peak"
+    elif usage.free > soft_required: status,warning="ready",None
+    else: status,warning="warning","soft reserve would be crossed; route new work elsewhere when an approved ready volume is available"
+    return {"path":canon(path),"total_bytes":usage.total,"free_bytes":usage.free,"reserve_bytes":soft_reserve,"soft_reserve_bytes":soft_reserve,"hard_reserve_bytes":hard_reserve,"active_reservation_bytes":reserved_bytes,"estimated_peak_bytes":peak,"peak_overhead_percent":settings["peak_overhead_percent"],"peak_reservation_bytes":peak_reservation,"required_free_bytes":soft_required,"hard_required_free_bytes":hard_required,"status":status,"warning":warning,"allowed":status != "defer"}
+def planning_reservations(state):
+    if state is None: return None,"not-supplied"
+    try: return load_reservations(state),"available"
+    except PolicyError as e: return None,f"unavailable: {e}"
+def approved_write_root(path, purpose, policy):
+    return any(is_within(path,root["path"]) and purpose in root["purposes"] for root in policy.get("write_roots",[]))
+def plan_candidate(path, peak, purpose, policy, reservations):
+    target=absolute_path(path); report={"path":target,"approved":False,"allowed":False}
+    if not Path(target).is_dir(): report["reason"]="candidate must be an existing directory"; return report
+    if is_reparse_point(target): report["reason"]="reparse-point candidate requires separate review"; return report
+    if protected(target,policy): report["reason"]="candidate is protected"; return report
+    if model_like(target): report["reason"]="model/checkpoint/cache candidate is excluded"; return report
+    if not approved_write_root(target,purpose,policy): report["reason"]="candidate is outside an approved write root for this purpose"; return report
+    active=reservation_total(reservations,target) if reservations is not None else 0
+    capacity=preflight(target,peak,policy,active)
+    report.update({"approved":True,"allowed":capacity["allowed"],"status":capacity["status"],"capacity":capacity})
+    return report
+def plan_write(map_path,path,estimated_peak_bytes=None,candidate_paths=(),state=None,probe_bytes=None,purpose="scratch"):
+    """Read-only routing advice; reserve again immediately before the chosen write."""
+    if purpose not in {"scratch","download","extract","build","cache"}: raise PolicyError("unsupported write purpose")
+    policy=load_map(map_path); settings=reservation_settings(policy)
+    unknown=estimated_peak_bytes is None
+    if unknown:
+        probe_bytes=settings["default_probe_bytes"] if probe_bytes is None else probe_bytes
+        if not isinstance(probe_bytes,int) or probe_bytes <= 0: raise PolicyError("unknown peak requires a positive bounded probe estimate")
+        peak=probe_bytes
+    else:
+        if not isinstance(estimated_peak_bytes,int) or estimated_peak_bytes < 0: raise PolicyError("estimated peak must be a known non-negative integer")
+        peak=estimated_peak_bytes
+    reservations,reservation_state=planning_reservations(state)
+    candidates=[]; seen=set()
+    for raw in (path,*candidate_paths):
+        target=absolute_path(raw)
+        if target not in seen: candidates.append(plan_candidate(target,peak,purpose,policy,reservations)); seen.add(target)
+    primary=candidates[0]; ready=[c for c in candidates if c["allowed"] and c.get("status")=="ready"]
+    alternate=next((c for c in ready if c["path"] != primary["path"]),None)
+    any_allowed=next((c for c in candidates if c["allowed"]),None)
+    if unknown:
+        decision="bounded-probe-and-estimate" if any_allowed else "defer-affected-write"
+        recommended=primary if primary["allowed"] and primary.get("status")=="ready" else alternate or (primary if primary["allowed"] else any_allowed)
+    elif primary["allowed"] and primary.get("status")=="ready":
+        decision="continue-primary"; recommended=primary
+    elif alternate is not None:
+        decision="route-new-work-to-approved-alternative"; recommended=alternate
+    elif primary["allowed"]:
+        decision="continue-primary-with-soft-warning"; recommended=primary
+    elif any_allowed is not None:
+        decision="route-new-work-to-approved-alternative"; recommended=any_allowed
+    else:
+        decision="defer-affected-write"; recommended=None
+    return {"read_only":True,"purpose":purpose,"estimated_peak_known":not unknown,"planning_peak_bytes":peak,"reservation_state":reservation_state,"candidates":candidates,"decision":decision,"recommended_path":recommended and recommended["path"],"continue_unrelated_work":True,"requires_fresh_reservation_before_write":True,"note":"This is a capacity snapshot, not permission to create, move, delete, or reconfigure data."}
 def runtime_root(): return Path.home()/".storage-awareness"
 def journal(event, payload, ledger=None):
     target=Path(ledger) if ledger else runtime_root()/"ledger.jsonl"
@@ -280,7 +365,7 @@ def checkpoint(map_path,path,peak,lock_directory,ledger=None,state=None,reservat
         policy=load_map(map_path); data=load_reservations(state)
         if reservation_id is not None:
             entries=[x for x in reservation_entries(data,target) if x["id"] == reservation_id]
-            if len(entries) != 1 or entries[0]["bytes"] < int(math.ceil(peak*1.25)): raise PolicyError("reservation missing or too small for checkpoint")
+            if len(entries) != 1 or entries[0]["bytes"] < peak_reservation_bytes(peak,policy): raise PolicyError("reservation missing or too small for checkpoint")
             peak=0
         result=preflight(target,peak,policy,reservation_total(data,target)); journal("capacity-checkpoint",{"reservation_id":reservation_id,**result},ledger)
         if not result["allowed"]: raise PolicyError("capacity checkpoint failed")
@@ -291,8 +376,7 @@ def delete_owned(map_path,path,grant_id,peak,lock_directory,ledger=None):
     target=absolute_path(raw)
     with volume_lock(raw.anchor,lock_directory):
         policy=load_map(map_path); find_grant(target,"delete",policy,grant_id)
-        capacity=preflight(raw.parent,peak,policy)
-        if raw.stat().st_nlink>1 or not capacity["allowed"]: raise PolicyError("delete target fails safe-boundary gate")
+        if raw.stat().st_nlink>1: raise PolicyError("hardlink target requires separate review")
         journal("owned-delete-intent",{"target":target,"grant_id":grant_id},ledger)
         try: raw.unlink()
         except OSError as e:
@@ -316,7 +400,12 @@ def record_relocation_disposition(transaction_id,state,config_disposition,smoke_
     with state_lock(state):
         data=load_reservations(state); tx=data["transactions"].get(transaction_id)
         if not tx or tx["status"] != "staged": raise PolicyError("transaction is not staged")
-        tx["config_disposition"],tx["smoke_disposition"]=config_disposition,smoke_disposition; write_reservations(state,data)
+        tx["config_disposition"],tx["smoke_disposition"]=config_disposition,smoke_disposition
+        if "failed" in {config_disposition,smoke_disposition}:
+            key=volume_key(tx["destination"]); entries=data["reservations"].get(key,[])
+            data["reservations"][key]=[entry for entry in entries if entry["id"] != tx["reservation_id"]]
+            journal("reservation-released",{"reservation_id":tx["reservation_id"],"volume":key,"reason":"relocation disposition failed; source and staged copy retained"},ledger)
+        write_reservations(state,data)
         journal("relocation-disposition",{"transaction_id":transaction_id,"config_disposition":config_disposition,"smoke_disposition":smoke_disposition},ledger); return tx
 def finalize_relocation(map_path,transaction_id,lock_directory,*,state,ledger=None):
     with state_lock(state):
@@ -327,16 +416,15 @@ def finalize_relocation(map_path,transaction_id,lock_directory,*,state,ledger=No
       with volume_locks((src.parent.anchor,dst.parent.anchor),lock_directory):
         policy=load_map(map_path); find_grant(src,"move",policy,tx["grant_id"],dst)
         entries=[x for x in reservation_entries(data,dst.parent) if x["id"] == tx["reservation_id"]]
-        if len(entries) != 1 or entries[0]["bytes"] < int(math.ceil(tx["peak_reservation_bytes"]*1.25)): raise PolicyError("reservation missing or too small for finalization")
-        capacity=preflight(dst.parent,0,policy,reservation_total(data,dst.parent))
-        journal("capacity-checkpoint",{"transaction_id":transaction_id,"reservation_id":tx["reservation_id"],**capacity},ledger)
-        if not capacity["allowed"]: raise PolicyError("capacity checkpoint failed")
+        if len(entries) != 1 or entries[0]["bytes"] < peak_reservation_bytes(tx["peak_reservation_bytes"],policy): raise PolicyError("reservation missing or too small for finalization")
         if (not src.is_file() or is_reparse_point(src) or src.stat().st_nlink > 1 or not dst.is_file() or is_reparse_point(dst) or dst.stat().st_nlink > 1 or protected(dst,policy) or model_like(dst) or not any(is_within(dst,root) for root in policy["approved_roots"]) or sha256_file(src) != tx["sha256"] or sha256_file(dst) != tx["sha256"]): raise PolicyError("source or staged destination changed before finalization")
         journal("relocation-finalize-intent",{"transaction_id":transaction_id,"source":tx["source"]},ledger)
         try: src.unlink()
         except OSError as e:
             journal("relocation-finalize-failed",{"transaction_id":transaction_id,"error":str(e)},ledger); raise
+        key=volume_key(dst.parent); data["reservations"][key]=[entry for entry in data["reservations"].get(key,[]) if entry["id"] != tx["reservation_id"]]
         tx["status"]="finalized"; tx["finalized_at"]=now().isoformat(); write_reservations(state,data)
+        journal("reservation-released",{"reservation_id":tx["reservation_id"],"volume":key,"reason":"relocation finalized"},ledger)
         journal("relocation-finalized",{"transaction_id":transaction_id,"source_deleted":tx["source"],"destination":tx["destination"]},ledger)
         return {"transaction_id":transaction_id,"finalized":True,"source_deleted":tx["source"],"destination":tx["destination"]}
 def value(item, snake, camel, default=None): return item.get(snake, item.get(camel, default))
@@ -361,6 +449,7 @@ def main():
     p=argparse.ArgumentParser(); sub=p.add_subparsers(dest="cmd", required=True)
     q=sub.add_parser("validate-map"); q.add_argument("--map", required=True)
     q=sub.add_parser("preflight"); q.add_argument("--path", required=True); q.add_argument("--estimated-peak-bytes", type=int, required=True); q.add_argument("--map")
+    q=sub.add_parser("plan-write"); q.add_argument("--map",required=True); q.add_argument("--path",required=True); q.add_argument("--purpose",choices=("scratch","download","extract","build","cache"),required=True); q.add_argument("--estimated-peak-bytes",type=int); q.add_argument("--candidate-path",action="append",default=[]); q.add_argument("--probe-bytes",type=int); q.add_argument("--state")
     q=sub.add_parser("check-mutation"); q.add_argument("--map", required=True); q.add_argument("--path", required=True); q.add_argument("--action", choices=("delete","move"), required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(Path.home()/".storage-awareness"/"locks")); q.add_argument("--grant-id")
     q=sub.add_parser("audit-inventory"); q.add_argument("--input", required=True); q.add_argument("--output", required=True)
     q=sub.add_parser("reserve"); q.add_argument("--map",required=True); q.add_argument("--path",required=True); q.add_argument("--reservation-id",required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--state",default=str(default_state())); q.add_argument("--ledger")
@@ -374,6 +463,7 @@ def main():
     try:
         if a.cmd == "validate-map": result={"valid": True, "schema_version": load_map(a.map)["schema_version"]}
         elif a.cmd == "preflight": result=preflight(a.path,a.estimated_peak_bytes,load_map(a.map) if a.map else None)
+        elif a.cmd == "plan-write": result=plan_write(a.map,a.path,a.estimated_peak_bytes,a.candidate_path,a.state,a.probe_bytes,a.purpose)
         elif a.cmd == "check-mutation":
             if is_reparse_point(a.path): raise PolicyError("reparse-point target requires separate review")
             target=absolute_path(a.path)

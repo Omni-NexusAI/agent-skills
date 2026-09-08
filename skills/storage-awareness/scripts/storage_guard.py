@@ -57,7 +57,15 @@ def load_map(filename):
         ids.add(grant["id"]); absolute_path(grant.get("target"))
         if grant.get("action") not in {"delete","move","compress"}: raise PolicyError("unrecognized grant action")
         if grant.get("action") == "move": absolute_path(grant.get("destination"))
-        if not all(grant.get(k) is True for k in ("agent_owned","positively_disposable","recovery_retained")): raise PolicyError("grant lacks ownership/disposal/recovery evidence")
+        if grant.get("model_relocation") is True:
+            if grant.get("action") != "move" or grant.get("artifact_owner") not in {"user","agent"} or grant.get("owner_approved") is not True or grant.get("recovery_retained") is not True: raise PolicyError("model relocation grant lacks exact owner/recovery evidence")
+            digest=grant.get("source_sha256"); companions=grant.get("companion_protections")
+            if not isinstance(digest,str) or len(digest)!=64 or any(c not in "0123456789abcdef" for c in digest) or not isinstance(companions,list): raise PolicyError("model relocation grant needs source hash and companion list")
+            for companion in companions:
+                if not isinstance(companion,dict): raise PolicyError("model relocation companion invalid")
+                absolute_path(companion.get("path")); value=companion.get("sha256")
+                if not isinstance(value,str) or len(value)!=64 or any(c not in "0123456789abcdef" for c in value): raise PolicyError("model relocation companion hash invalid")
+        elif not all(grant.get(k) is True for k in ("agent_owned","positively_disposable","recovery_retained")): raise PolicyError("grant lacks ownership/disposal/recovery evidence")
         try: parse_time(grant["expires_at"])
         except (KeyError,TypeError,ValueError): raise PolicyError("grant expiry must be timezone-aware")
     return data
@@ -67,6 +75,13 @@ def is_reparse_point(path):
     try:
         return p.is_symlink() or (hasattr(p,"is_junction") and p.is_junction()) or bool(getattr(p.lstat(),"st_file_attributes",0) & 0x400)
     except OSError: return True
+def has_reparse_ancestor(path):
+    item=Path(path)
+    while True:
+        if is_reparse_point(item): return True
+        parent=item.parent
+        if parent == item: return False
+        item=parent
 def model_like(path):
     lower = canon(path).replace("\\", "/")
     name = lower.rsplit("/", 1)[-1]
@@ -109,10 +124,29 @@ def find_grant(path, action, policy, grant_id=None, destination=None):
     matches=[g for g in policy["action_grants"] if g.get("action")==action and canon(g.get("target", ""))==target and (grant_id is None or g.get("id")==grant_id)]
     if len(matches)!=1: raise PolicyError("no unique exact live action grant")
     grant=matches[0]
+    if grant.get("model_relocation") is True: raise PolicyError("model relocation requires its dedicated transaction commands")
     if parse_time(grant["expires_at"]) < now(): raise PolicyError("action grant expired")
     if action == "move":
         if destination is None or "destination" not in grant: raise PolicyError("move grant lacks exact destination binding")
         if canon(grant["destination"]) != absolute_path(destination): raise PolicyError("destination does not match exact move grant")
+    return grant
+def find_model_relocation_grant(source,destination,policy,grant_id,*,staged=False):
+    raw_src,raw_dst=Path(source),Path(destination)
+    if has_reparse_ancestor(raw_src) or has_reparse_ancestor(raw_dst.parent) or (raw_dst.exists() and has_reparse_ancestor(raw_dst)): raise PolicyError("model relocation raw path is a reparse point")
+    src,dst=absolute_path(source),absolute_path(destination)
+    matches=[g for g in policy["action_grants"] if g.get("model_relocation") is True and g.get("action")=="move" and g.get("id")==grant_id and canon(g.get("target",""))==src and canon(g.get("destination",""))==dst]
+    if len(matches)!=1 or parse_time(matches[0]["expires_at"]) < now(): raise PolicyError("no unique live exact model relocation grant")
+    grant=matches[0]; raw_src,raw_dst=Path(src),Path(dst)
+    if not model_like(src) or not model_like(dst) or not protected(src,policy) or not protected(dst,policy) or not any(is_within(dst,root) for root in policy["approved_roots"]): raise PolicyError("model relocation protection or destination-root evidence missing")
+    if not raw_src.is_file() or is_reparse_point(raw_src) or raw_src.stat().st_nlink>1 or sha256_file(raw_src)!=grant["source_sha256"]: raise PolicyError("model relocation source identity changed")
+    if is_reparse_point(raw_dst.parent) or (not staged and raw_dst.exists()) or (staged and (not raw_dst.is_file() or is_reparse_point(raw_dst) or raw_dst.stat().st_nlink>1 or sha256_file(raw_dst)!=grant["source_sha256"])): raise PolicyError("model relocation destination fails identity checks")
+    seen=set()
+    for companion in grant["companion_protections"]:
+        raw_item=Path(companion["path"])
+        if has_reparse_ancestor(raw_item): raise PolicyError("model relocation companion is a reparse point")
+        item=Path(absolute_path(companion["path"]))
+        if str(item) in seen or item in {raw_src,raw_dst} or not item.is_file() or is_reparse_point(item) or item.stat().st_nlink>1 or not model_like(item) or not protected(item,policy) or sha256_file(item)!=companion["sha256"]: raise PolicyError("model relocation companion protection changed")
+        seen.add(str(item))
     return grant
 def mutation_allowed(path, action, policy, grant_id=None): return find_grant(path,action,policy,grant_id)["id"]
 def tree_issues(path, policy, allowed_extensions=None):
@@ -323,6 +357,15 @@ def load_reservations(state, *, create=False):
             if not isinstance(tx.get(key),str) or not tx[key]: raise PolicyError("transaction state invalid")
         if not isinstance(tx.get("peak_reservation_bytes"),int) or tx["peak_reservation_bytes"] < 0: raise PolicyError("transaction state invalid")
         absolute_path(tx["source"]); absolute_path(tx["destination"])
+        kind=tx.get("kind")
+        if kind not in {None,"model_relocation"}: raise PolicyError("transaction state invalid")
+        if kind == "model_relocation":
+            if tx.get("config_disposition") not in {"not-run","passed","failed"} or tx.get("smoke_disposition") not in {"not-run","passed","failed"} or not isinstance(tx.get("config_evidence"),str) or not isinstance(tx.get("smoke_evidence"),str) or not isinstance(tx.get("companions"),list): raise PolicyError("model relocation transaction invalid")
+            if tx["config_disposition"]=="passed" and not tx["config_evidence"].strip() or tx["smoke_disposition"]=="passed" and not tx["smoke_evidence"].strip(): raise PolicyError("model relocation transaction evidence invalid")
+            for companion in tx["companions"]:
+                if not isinstance(companion,dict): raise PolicyError("model relocation transaction invalid")
+                absolute_path(companion.get("path")); digest=companion.get("sha256")
+                if not isinstance(digest,str) or len(digest)!=64 or any(c not in "0123456789abcdef" for c in digest): raise PolicyError("model relocation transaction invalid")
     return data
 def write_reservations(state, data):
     path=Path(state) if state else default_state(); path.parent.mkdir(parents=True,exist_ok=True)
@@ -348,6 +391,17 @@ def reserve(map_path,path,reservation_id,peak,lock_directory,state=None,ledger=N
         entry={"id":reservation_id,"bytes":result["peak_reservation_bytes"],"created_at":now().isoformat()}
         data["reservations"].setdefault(volume_key(target),[]).append(entry); write_reservations(state,data)
         journal("reservation-created",{"reservation_id":reservation_id,"volume":volume_key(target),"bytes":entry["bytes"],"capacity":result},ledger); return entry
+def reserve_model_relocation(map_path,source,destination,grant_id,reservation_id,peak,lock_directory,state=None,ledger=None):
+    src,dst=Path(source),Path(destination)
+    if not isinstance(reservation_id,str) or not reservation_id: raise PolicyError("reservation id must be nonempty")
+    with state_lock(state):
+      with volume_locks((src.parent.anchor,dst.parent.anchor),lock_directory):
+        policy=load_map(map_path); grant=find_model_relocation_grant(src,dst,policy,grant_id); data=load_reservations(state,create=True)
+        if any(x["id"]==reservation_id for rows in data["reservations"].values() for x in rows): raise PolicyError("reservation id already exists")
+        effective=max(peak,src.stat().st_size); result=preflight(dst.parent,effective,policy,reservation_total(data,dst.parent))
+        if not result["allowed"]: raise PolicyError("destination capacity preflight failed")
+        entry={"id":reservation_id,"bytes":result["peak_reservation_bytes"],"created_at":now().isoformat()}; data["reservations"].setdefault(volume_key(dst.parent),[]).append(entry); write_reservations(state,data)
+        journal("model-relocation-reservation",{"reservation_id":reservation_id,"grant_id":grant["id"],"bytes":entry["bytes"],"capacity":result},ledger); return entry
 def release_reservation(path,reservation_id,lock_directory,state=None,ledger=None):
     target=absolute_path(path)
     with state_lock(state):
@@ -395,11 +449,31 @@ def stage_relocation(map_path,source,destination,grant_id,peak,lock_directory,*,
         data["transactions"][transaction_id]=tx; write_reservations(state,data)
         journal("relocation-staged",{"transaction_id":transaction_id,"source_retained":True,**tx},ledger)
         return {"transaction_id":transaction_id,"finalized":False,"source_retained":True,"recovery":"source and verified staged destination retained",**staged}
+def stage_model_relocation(map_path,source,destination,grant_id,peak,lock_directory,*,state,reservation_id,transaction_id,ledger=None):
+    src,dst=Path(source),Path(destination)
+    if not isinstance(transaction_id,str) or not transaction_id: raise PolicyError("transaction id must be nonempty")
+    with state_lock(state):
+      data=load_reservations(state)
+      if transaction_id in data["transactions"]: raise PolicyError("transaction id already exists")
+      with volume_locks((src.parent.anchor,dst.parent.anchor),lock_directory):
+        policy=load_map(map_path); grant=find_model_relocation_grant(src,dst,policy,grant_id); effective=max(peak,src.stat().st_size)
+        entries=[x for x in reservation_entries(data,dst.parent) if x["id"]==reservation_id]
+        if len(entries)!=1 or entries[0]["bytes"]<peak_reservation_bytes(effective,policy) or not preflight(dst.parent,0,policy,reservation_total(data,dst.parent))["allowed"]: raise PolicyError("model relocation reservation or capacity missing")
+        fd,name=tempfile.mkstemp(prefix=".storage-model-stage-",dir=dst.parent); os.close(fd); stage=Path(name)
+        try:
+            journal("model-relocation-copy-intent",{"transaction_id":transaction_id,"source":absolute_path(src),"destination":absolute_path(dst)},ledger); shutil.copyfile(src,stage)
+            if src.stat().st_size!=stage.stat().st_size or sha256_file(stage)!=grant["source_sha256"]: raise PolicyError("model relocation copy verification failed")
+            os.link(stage,dst); stage.unlink(); stage=None
+        except Exception as e:
+            if stage is not None and stage.exists(): stage.unlink()
+            journal("model-relocation-copy-failed",{"transaction_id":transaction_id,"error":str(e)},ledger); raise
+        tx={"kind":"model_relocation","status":"staged","source":absolute_path(src),"destination":absolute_path(dst),"grant_id":grant_id,"reservation_id":reservation_id,"sha256":grant["source_sha256"],"peak_reservation_bytes":effective,"config_disposition":"not-run","smoke_disposition":"not-run","config_evidence":"","smoke_evidence":"","companions":grant["companion_protections"],"staged_at":now().isoformat()}; data["transactions"][transaction_id]=tx; write_reservations(state,data)
+        journal("model-relocation-staged",{"transaction_id":transaction_id,"source_retained":True},ledger); return {"transaction_id":transaction_id,"finalized":False,"source_retained":True,"sha256":tx["sha256"]}
 def record_relocation_disposition(transaction_id,state,config_disposition,smoke_disposition,ledger=None):
     if config_disposition not in {"passed","failed"} or smoke_disposition not in {"passed","failed"}: raise PolicyError("dispositions must be reviewed passed or failed")
     with state_lock(state):
         data=load_reservations(state); tx=data["transactions"].get(transaction_id)
-        if not tx or tx["status"] != "staged": raise PolicyError("transaction is not staged")
+        if not tx or tx["status"] != "staged" or tx.get("kind")=="model_relocation": raise PolicyError("transaction is not a generic staged relocation")
         tx["config_disposition"],tx["smoke_disposition"]=config_disposition,smoke_disposition
         if "failed" in {config_disposition,smoke_disposition}:
             key=volume_key(tx["destination"]); entries=data["reservations"].get(key,[])
@@ -407,10 +481,20 @@ def record_relocation_disposition(transaction_id,state,config_disposition,smoke_
             journal("reservation-released",{"reservation_id":tx["reservation_id"],"volume":key,"reason":"relocation disposition failed; source and staged copy retained"},ledger)
         write_reservations(state,data)
         journal("relocation-disposition",{"transaction_id":transaction_id,"config_disposition":config_disposition,"smoke_disposition":smoke_disposition},ledger); return tx
+def record_model_relocation_disposition(transaction_id,state,config_disposition,smoke_disposition,config_evidence,smoke_evidence,ledger=None):
+    if config_disposition not in {"passed","failed"} or smoke_disposition not in {"passed","failed"} or not isinstance(config_evidence,str) or not config_evidence.strip() or not isinstance(smoke_evidence,str) or not smoke_evidence.strip(): raise PolicyError("model relocation needs reviewed dispositions and nonempty evidence references")
+    with state_lock(state):
+        data=load_reservations(state); tx=data["transactions"].get(transaction_id)
+        if not tx or tx.get("kind")!="model_relocation" or tx["status"]!="staged": raise PolicyError("transaction is not a staged model relocation")
+        tx.update({"config_disposition":config_disposition,"smoke_disposition":smoke_disposition,"config_evidence":config_evidence,"smoke_evidence":smoke_evidence})
+        if "failed" in {config_disposition,smoke_disposition}:
+            key=volume_key(tx["destination"]); data["reservations"][key]=[entry for entry in data["reservations"].get(key,[]) if entry["id"]!=tx["reservation_id"]]; journal("reservation-released",{"reservation_id":tx["reservation_id"],"reason":"model relocation disposition failed; both copies retained"},ledger)
+        write_reservations(state,data); journal("model-relocation-disposition",{"transaction_id":transaction_id,"config_disposition":config_disposition,"smoke_disposition":smoke_disposition},ledger); return tx
 def finalize_relocation(map_path,transaction_id,lock_directory,*,state,ledger=None):
     with state_lock(state):
       data=load_reservations(state); tx=data["transactions"].get(transaction_id)
       if not tx or tx["status"] != "staged": raise PolicyError("transaction is not staged")
+      if tx.get("kind")=="model_relocation": raise PolicyError("model relocation requires finalize-model-relocation")
       if tx["config_disposition"] != "passed" or tx["smoke_disposition"] != "passed": raise PolicyError("reviewed config and smoke dispositions have not both passed")
       src,dst=Path(tx["source"]),Path(tx["destination"])
       with volume_locks((src.parent.anchor,dst.parent.anchor),lock_directory):
@@ -427,6 +511,17 @@ def finalize_relocation(map_path,transaction_id,lock_directory,*,state,ledger=No
         journal("reservation-released",{"reservation_id":tx["reservation_id"],"volume":key,"reason":"relocation finalized"},ledger)
         journal("relocation-finalized",{"transaction_id":transaction_id,"source_deleted":tx["source"],"destination":tx["destination"]},ledger)
         return {"transaction_id":transaction_id,"finalized":True,"source_deleted":tx["source"],"destination":tx["destination"]}
+def finalize_model_relocation(map_path,transaction_id,lock_directory,*,state,ledger=None):
+    with state_lock(state):
+      data=load_reservations(state); tx=data["transactions"].get(transaction_id)
+      if not tx or tx.get("kind")!="model_relocation" or tx.get("status")!="staged": raise PolicyError("transaction is not a staged model relocation")
+      if tx["config_disposition"]!="passed" or tx["smoke_disposition"]!="passed" or not tx.get("config_evidence") or not tx.get("smoke_evidence"): raise PolicyError("reviewed model config and smoke evidence have not both passed")
+      src,dst=Path(tx["source"]),Path(tx["destination"])
+      with volume_locks((src.parent.anchor,dst.parent.anchor),lock_directory):
+        policy=load_map(map_path); grant=find_model_relocation_grant(src,dst,policy,tx["grant_id"],staged=True); entries=[x for x in reservation_entries(data,dst.parent) if x["id"]==tx["reservation_id"]]
+        if len(entries)!=1 or entries[0]["bytes"]<peak_reservation_bytes(tx["peak_reservation_bytes"],policy) or sha256_file(src)!=tx["sha256"] or sha256_file(dst)!=tx["sha256"] or grant["companion_protections"]!=tx["companions"]: raise PolicyError("model relocation evidence changed before finalization")
+        journal("model-relocation-finalize-intent",{"transaction_id":transaction_id,"source":tx["source"]},ledger); src.unlink(); key=volume_key(dst.parent); data["reservations"][key]=[entry for entry in data["reservations"].get(key,[]) if entry["id"]!=tx["reservation_id"]]; tx["status"]="finalized"; tx["finalized_at"]=now().isoformat(); write_reservations(state,data)
+        journal("reservation-released",{"reservation_id":tx["reservation_id"],"reason":"model relocation finalized"},ledger); journal("model-relocation-finalized",{"transaction_id":transaction_id,"source_deleted":tx["source"],"destination":tx["destination"]},ledger); return {"transaction_id":transaction_id,"finalized":True,"source_deleted":tx["source"],"destination":tx["destination"]}
 def value(item, snake, camel, default=None): return item.get(snake, item.get(camel, default))
 def normalized_item(item, hardlink_evidence=()):
     path = item.get("path") or item.get("exact_path") or ""
@@ -453,12 +548,16 @@ def main():
     q=sub.add_parser("check-mutation"); q.add_argument("--map", required=True); q.add_argument("--path", required=True); q.add_argument("--action", choices=("delete","move"), required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(Path.home()/".storage-awareness"/"locks")); q.add_argument("--grant-id")
     q=sub.add_parser("audit-inventory"); q.add_argument("--input", required=True); q.add_argument("--output", required=True)
     q=sub.add_parser("reserve"); q.add_argument("--map",required=True); q.add_argument("--path",required=True); q.add_argument("--reservation-id",required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--state",default=str(default_state())); q.add_argument("--ledger")
+    q=sub.add_parser("reserve-model-relocation"); q.add_argument("--map",required=True); q.add_argument("--source",required=True); q.add_argument("--destination",required=True); q.add_argument("--grant-id",required=True); q.add_argument("--reservation-id",required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--state",default=str(default_state())); q.add_argument("--ledger")
     q=sub.add_parser("release-reservation"); q.add_argument("--path",required=True); q.add_argument("--reservation-id",required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--state",default=str(default_state())); q.add_argument("--ledger")
     q=sub.add_parser("checkpoint"); q.add_argument("--map",required=True); q.add_argument("--path",required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--state",default=str(default_state())); q.add_argument("--reservation-id"); q.add_argument("--ledger")
     q=sub.add_parser("delete-owned"); q.add_argument("--map",required=True); q.add_argument("--path",required=True); q.add_argument("--grant-id",required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--ledger")
     q=sub.add_parser("stage-relocation"); q.add_argument("--map",required=True); q.add_argument("--source",required=True); q.add_argument("--destination",required=True); q.add_argument("--grant-id",required=True); q.add_argument("--reservation-id",required=True); q.add_argument("--transaction-id",required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--state",default=str(default_state())); q.add_argument("--ledger")
+    q=sub.add_parser("stage-model-relocation"); q.add_argument("--map",required=True); q.add_argument("--source",required=True); q.add_argument("--destination",required=True); q.add_argument("--grant-id",required=True); q.add_argument("--reservation-id",required=True); q.add_argument("--transaction-id",required=True); q.add_argument("--estimated-peak-bytes",type=int,required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--state",default=str(default_state())); q.add_argument("--ledger")
     q=sub.add_parser("record-relocation-disposition"); q.add_argument("--transaction-id",required=True); q.add_argument("--state",default=str(default_state())); q.add_argument("--ledger"); q.add_argument("--config-disposition",choices=("passed","failed"),required=True); q.add_argument("--smoke-disposition",choices=("passed","failed"),required=True)
+    q=sub.add_parser("record-model-relocation-disposition"); q.add_argument("--transaction-id",required=True); q.add_argument("--state",default=str(default_state())); q.add_argument("--ledger"); q.add_argument("--config-disposition",choices=("passed","failed"),required=True); q.add_argument("--smoke-disposition",choices=("passed","failed"),required=True); q.add_argument("--config-evidence",required=True); q.add_argument("--smoke-evidence",required=True)
     q=sub.add_parser("finalize-relocation"); q.add_argument("--map",required=True); q.add_argument("--transaction-id",required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--state",default=str(default_state())); q.add_argument("--ledger")
+    q=sub.add_parser("finalize-model-relocation"); q.add_argument("--map",required=True); q.add_argument("--transaction-id",required=True); q.add_argument("--lock-directory",default=str(runtime_root()/"locks")); q.add_argument("--state",default=str(default_state())); q.add_argument("--ledger")
     a=p.parse_args()
     try:
         if a.cmd == "validate-map": result={"valid": True, "schema_version": load_map(a.map)["schema_version"]}
@@ -474,12 +573,16 @@ def main():
                 if Path(target).is_file() and Path(target).stat().st_nlink > 1: raise PolicyError("hardlink target requires separate review")
                 result={"allowed":True,"grant_id":grant_id,"capacity":capacity}
         elif a.cmd == "reserve": result=reserve(a.map,a.path,a.reservation_id,a.estimated_peak_bytes,a.lock_directory,a.state,a.ledger)
+        elif a.cmd == "reserve-model-relocation": result=reserve_model_relocation(a.map,a.source,a.destination,a.grant_id,a.reservation_id,a.estimated_peak_bytes,a.lock_directory,a.state,a.ledger)
         elif a.cmd == "release-reservation": result=release_reservation(a.path,a.reservation_id,a.lock_directory,a.state,a.ledger)
         elif a.cmd == "checkpoint": result=checkpoint(a.map,a.path,a.estimated_peak_bytes,a.lock_directory,a.ledger,a.state,a.reservation_id)
         elif a.cmd == "delete-owned": result=delete_owned(a.map,a.path,a.grant_id,a.estimated_peak_bytes,a.lock_directory,a.ledger)
         elif a.cmd == "stage-relocation": result=stage_relocation(a.map,a.source,a.destination,a.grant_id,a.estimated_peak_bytes,a.lock_directory,state=a.state,reservation_id=a.reservation_id,transaction_id=a.transaction_id,ledger=a.ledger)
+        elif a.cmd == "stage-model-relocation": result=stage_model_relocation(a.map,a.source,a.destination,a.grant_id,a.estimated_peak_bytes,a.lock_directory,state=a.state,reservation_id=a.reservation_id,transaction_id=a.transaction_id,ledger=a.ledger)
         elif a.cmd == "record-relocation-disposition": result=record_relocation_disposition(a.transaction_id,a.state,a.config_disposition,a.smoke_disposition,a.ledger)
+        elif a.cmd == "record-model-relocation-disposition": result=record_model_relocation_disposition(a.transaction_id,a.state,a.config_disposition,a.smoke_disposition,a.config_evidence,a.smoke_evidence,a.ledger)
         elif a.cmd == "finalize-relocation": result=finalize_relocation(a.map,a.transaction_id,a.lock_directory,state=a.state,ledger=a.ledger)
+        elif a.cmd == "finalize-model-relocation": result=finalize_model_relocation(a.map,a.transaction_id,a.lock_directory,state=a.state,ledger=a.ledger)
         else:
             raw=json.loads(Path(a.input).read_text(encoding="utf-8")); items=raw.get("items", raw if isinstance(raw,list) else [])
             if not isinstance(items,list): raise PolicyError("inventory items must be a list")

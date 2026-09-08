@@ -83,6 +83,23 @@ reviewed workflows. Do not pause arbitrary processes. A bounded inventory or
 planning subagent may keep searching approved alternatives while the affected
 write waits under shared reservation accounting.
 
+## Explicit model relocation
+
+Model compression and standalone model deletion remain forbidden. A user-approved
+model relocation uses a separate capability, never the generic move helpers. Its
+private exact grant must bind source and destination paths, source SHA-256,
+artifact owner approval, recovery retention, and hashes for every protected
+companion. The policy must protect the source, destination, and companions before
+staging; this preserves protection at both locations until finalization.
+
+`reserve-model-relocation` and `stage-model-relocation` retain the source after a
+hash-verified copy. Record nonempty reviewed configuration and smoke evidence with
+`record-model-relocation-disposition`; only two `passed` dispositions allow
+`finalize-model-relocation` to delete the original source. Any mismatch, failed
+disposition, link/reparse change, hash change, missing reservation, or protection
+loss retains both copies. Do not use this capability for companion files unless
+they have their own exact approved transaction.
+
 Docker/WSL lifecycle remains owned by the Docker specialist. Do not duplicate its
 shutdown, pause, or VHDX-compaction policy here.
 
@@ -108,6 +125,7 @@ python scripts/storage_guard.py preflight --path E:\work --estimated-peak-bytes 
 python scripts/storage_guard.py plan-write --map C:\private\storage-policy.json --path C:\agent-work --purpose build --estimated-peak-bytes 2147483648 --candidate-path E:\agent-work
 python scripts/storage_guard.py reserve --map C:\private\storage-policy.json --path E:\work --reservation-id build-42 --estimated-peak-bytes 2147483648
 python scripts/storage_guard.py checkpoint --map C:\private\storage-policy.json --path E:\work --reservation-id build-42 --estimated-peak-bytes 2147483648
+python scripts/storage_guard.py reserve-model-relocation --map C:\private\storage-policy.json --source C:\models\exact.gguf --destination D:\models\exact.gguf --grant-id exact-model-move --reservation-id model-42 --estimated-peak-bytes 7165121600
 python scripts/storage_guard.py audit-inventory --input inventory.json --output normalized.json
 python -m unittest discover -s tests -v
 ```

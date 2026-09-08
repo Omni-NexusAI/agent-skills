@@ -13,6 +13,10 @@ class GuardTests(unittest.TestCase):
  def copy_args(self,src,dst,root):
   p=policy(protected_paths=[],approved_roots=[str(root)],action_grants=[{"id":"move","action":"move","target":str(src),"destination":str(dst),"agent_owned":True,"positively_disposable":True,"recovery_retained":True,"expires_at":(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()}])
   m=root/"policy.json"; m.write_text(json.dumps(p)); return m,"move",0,str(root/"locks")
+ def model_args(self,root):
+  src=root/"Bonsai.gguf"; dst=root/"models"/"Bonsai.gguf"; companion=root/"Bonsai-draft.gguf"; dst.parent.mkdir(); src.write_bytes(b"model-source"); companion.write_bytes(b"model-companion")
+  grant={"id":"model-move","action":"move","model_relocation":True,"target":str(src),"destination":str(dst),"source_sha256":guard.sha256_file(src),"artifact_owner":"user","owner_approved":True,"recovery_retained":True,"companion_protections":[{"path":str(companion),"sha256":guard.sha256_file(companion)}],"expires_at":(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()}
+  m=root/"model-policy.json"; m.write_text(json.dumps(policy(protected_paths=[str(src),str(dst),str(companion)],approved_roots=[str(root)],action_grants=[grant],reservations={"default_min_bytes":0,"default_percent":0,"hard_min_bytes":0,"hard_percent":0}))); return src,dst,companion,m,"model-move",str(root/"locks")
  def test_protected_alias_wins(self):
   p=policy(action_grants=[{"id":"x","action":"delete","target":"C:/safe/file","agent_owned":True,"positively_disposable":True,"recovery_retained":True,"expires_at":(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()}])
   with self.assertRaises(guard.PolicyError): guard.mutation_allowed("C:/safe/file","delete",p)
@@ -157,6 +161,28 @@ class GuardTests(unittest.TestCase):
    result=guard.stage_relocation(m,src,dst,g,peak,lock,state=state,reservation_id="r1",transaction_id="tx1",ledger=ledger)
    self.assertFalse(result["finalized"]); self.assertTrue(src.exists()); self.assertTrue(dst.exists()); self.assertEqual(json.loads(state.read_text())["transactions"]["tx1"]["status"],"staged")
    with self.assertRaises(guard.PolicyError): guard.finalize_relocation(m,"tx1",lock,state=state,ledger=ledger)
+ def test_model_relocation_is_distinct_and_requires_reviewed_finalization(self):
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d); src,dst,companion,m,g,lock=self.model_args(root); state=root/"state.json"; ledger=root/"ledger.jsonl"
+   with self.assertRaises(guard.PolicyError): guard.stage_relocation(m,src,dst,g,0,lock,state=state,reservation_id="wrong",transaction_id="wrong")
+   guard.reserve_model_relocation(m,src,dst,g,"model-r1",0,lock,state,ledger); staged=guard.stage_model_relocation(m,src,dst,g,0,lock,state=state,reservation_id="model-r1",transaction_id="model-tx",ledger=ledger)
+   self.assertTrue(staged["source_retained"]); self.assertTrue(src.exists()); self.assertEqual(guard.sha256_file(src),guard.sha256_file(dst))
+   with self.assertRaises(guard.PolicyError): guard.finalize_model_relocation(m,"model-tx",lock,state=state,ledger=ledger)
+   with self.assertRaises(guard.PolicyError): guard.record_relocation_disposition("model-tx",state,"passed","passed",ledger)
+   guard.record_model_relocation_disposition("model-tx",state,"passed","passed","config-switch-verified","smoke-verified",ledger); result=guard.finalize_model_relocation(m,"model-tx",lock,state=state,ledger=ledger)
+   self.assertTrue(result["finalized"]); self.assertFalse(src.exists()); self.assertTrue(dst.exists()); self.assertTrue(companion.exists()); self.assertFalse(guard.reservation_entries(guard.load_reservations(state),dst.parent))
+ def test_model_relocation_rejects_staged_destination_or_companion_alias(self):
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d); src,dst,companion,m,g,lock=self.model_args(root); state=root/"state.json"; guard.reserve_model_relocation(m,src,dst,g,"model-r1",0,lock,state); guard.stage_model_relocation(m,src,dst,g,0,lock,state=state,reservation_id="model-r1",transaction_id="model-tx"); guard.record_model_relocation_disposition("model-tx",state,"passed","passed","config","smoke")
+   dst.unlink(); dst.symlink_to(src)
+   with self.assertRaises(guard.PolicyError): guard.finalize_model_relocation(m,"model-tx",lock,state=state)
+   self.assertTrue(src.exists())
+ def test_model_relocation_rejects_staged_destination_reparse_ancestor(self):
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d); src,dst,companion,m,g,lock=self.model_args(root); state=root/"state.json"; guard.reserve_model_relocation(m,src,dst,g,"model-r1",0,lock,state); guard.stage_model_relocation(m,src,dst,g,0,lock,state=state,reservation_id="model-r1",transaction_id="model-tx"); guard.record_model_relocation_disposition("model-tx",state,"passed","passed","config","smoke")
+   actual=root/"actual-models"; dst.parent.rename(actual); dst.parent.symlink_to(actual,target_is_directory=True)
+   with self.assertRaises(guard.PolicyError): guard.finalize_model_relocation(m,"model-tx",lock,state=state)
+   self.assertTrue(src.exists())
  def test_relocation_finalizes_only_after_separate_dispositions_and_verified_copy(self):
   with tempfile.TemporaryDirectory() as d:
    root=Path(d); src=root/"source.tmp"; dst=root/"destination.tmp"; src.write_bytes(b"safe")

@@ -191,6 +191,19 @@ def sha256_file(path):
     with Path(path).open("rb") as f:
         for block in iter(lambda:f.read(1024*1024), b""): h.update(block)
     return h.hexdigest()
+def create_stage_file(directory, prefix):
+    """Create an empty exclusive stage file without tempfile's unbounded retry loop."""
+    directory=Path(directory)
+    try: directory.mkdir(parents=True,exist_ok=True)
+    except OSError as e: raise PolicyError(f"staging directory unavailable: {e}")
+    for _ in range(16):
+        stage=directory / f"{prefix}{os.urandom(16).hex()}"
+        try: fd=os.open(stage,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
+        except FileExistsError: continue
+        except OSError as e: raise PolicyError(f"staging file unavailable: {e}")
+        else:
+            os.close(fd); return stage
+    raise PolicyError("unable to allocate unique staging file after 16 attempts")
 def copy_verify(source, destination, map_path, grant_id, estimated_peak_bytes, lock_directory, verifier=None, copy_impl=None, state=None, reservation_id=None, ledger=None, _state_locked=False):
     """Stage a copy and hash it; remove only the staged copy if verification fails."""
     src, dst = Path(source), Path(destination)
@@ -215,8 +228,7 @@ def copy_verify(source, destination, map_path, grant_id, estimated_peak_bytes, l
             capacity=preflight(dst.parent,0,policy,reservation_total(reservations,dst.parent))
         if not capacity["allowed"]: raise PolicyError("destination capacity preflight failed")
         if dst.exists(): raise PolicyError("destination appeared during staging")
-        dst.parent.mkdir(parents=True,exist_ok=True)
-        fd,name=tempfile.mkstemp(prefix=".storage-stage-",dir=dst.parent); os.close(fd); stage=Path(name)
+        stage=create_stage_file(dst.parent,".storage-stage-")
         journal("copy-intent",{"source":absolute_path(src),"destination":absolute_path(dst),"effective_peak_bytes":effective_peak},ledger)
         copy_impl(src,stage)
         verified=src.stat().st_size == stage.stat().st_size and sha256_file(src) == sha256_file(stage)
@@ -459,7 +471,10 @@ def stage_model_relocation(map_path,source,destination,grant_id,peak,lock_direct
         policy=load_map(map_path); grant=find_model_relocation_grant(src,dst,policy,grant_id); effective=max(peak,src.stat().st_size)
         entries=[x for x in reservation_entries(data,dst.parent) if x["id"]==reservation_id]
         if len(entries)!=1 or entries[0]["bytes"]<peak_reservation_bytes(effective,policy) or not preflight(dst.parent,0,policy,reservation_total(data,dst.parent))["allowed"]: raise PolicyError("model relocation reservation or capacity missing")
-        fd,name=tempfile.mkstemp(prefix=".storage-model-stage-",dir=dst.parent); os.close(fd); stage=Path(name)
+        journal("model-relocation-stage-create-intent",{"transaction_id":transaction_id,"destination":absolute_path(dst)},ledger)
+        try: stage=create_stage_file(dst.parent,".storage-model-stage-")
+        except Exception as e:
+            journal("model-relocation-stage-create-failed",{"transaction_id":transaction_id,"error":str(e)},ledger); raise
         try:
             journal("model-relocation-copy-intent",{"transaction_id":transaction_id,"source":absolute_path(src),"destination":absolute_path(dst)},ledger); shutil.copyfile(src,stage)
             if src.stat().st_size!=stage.stat().st_size or sha256_file(stage)!=grant["source_sha256"]: raise PolicyError("model relocation copy verification failed")

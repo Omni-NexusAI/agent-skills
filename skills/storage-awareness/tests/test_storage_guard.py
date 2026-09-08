@@ -99,6 +99,11 @@ class GuardTests(unittest.TestCase):
     with guard.volume_lock("C:/",d): raise RuntimeError("simulated stage failure")
    except RuntimeError: pass
    with guard.volume_lock("C:/",d): pass
+ def test_stage_file_permission_denial_fails_without_retry_spin(self):
+  with tempfile.TemporaryDirectory() as d:
+   with mock.patch.object(guard.os,"open",side_effect=PermissionError("denied")) as opened:
+    with self.assertRaises(guard.PolicyError): guard.create_stage_file(d,".stage-")
+   self.assertEqual(opened.call_count,1)
  def test_copy_verification_preserves_source(self):
   with tempfile.TemporaryDirectory() as d:
    src=Path(d)/"source"; dst=Path(d)/"copy"; src.write_bytes(b"safe")
@@ -171,6 +176,13 @@ class GuardTests(unittest.TestCase):
    with self.assertRaises(guard.PolicyError): guard.record_relocation_disposition("model-tx",state,"passed","passed",ledger)
    guard.record_model_relocation_disposition("model-tx",state,"passed","passed","config-switch-verified","smoke-verified",ledger); result=guard.finalize_model_relocation(m,"model-tx",lock,state=state,ledger=ledger)
    self.assertTrue(result["finalized"]); self.assertFalse(src.exists()); self.assertTrue(dst.exists()); self.assertTrue(companion.exists()); self.assertFalse(guard.reservation_entries(guard.load_reservations(state),dst.parent))
+ def test_model_stage_records_and_fails_fast_when_destination_is_unwritable(self):
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d); src,dst,companion,m,g,lock=self.model_args(root); state=root/"state.json"; ledger=root/"ledger.jsonl"
+   guard.reserve_model_relocation(m,src,dst,g,"model-r1",0,lock,state,ledger)
+   with mock.patch.object(guard,"create_stage_file",side_effect=guard.PolicyError("staging file unavailable: denied")) as create:
+    with self.assertRaises(guard.PolicyError): guard.stage_model_relocation(m,src,dst,g,0,lock,state=state,reservation_id="model-r1",transaction_id="model-tx",ledger=ledger)
+   self.assertEqual(create.call_count,1); self.assertTrue(src.exists()); self.assertFalse(dst.exists()); self.assertIn("model-relocation-stage-create-failed",ledger.read_text())
  def test_model_relocation_rejects_staged_destination_or_companion_alias(self):
   with tempfile.TemporaryDirectory() as d:
    root=Path(d); src,dst,companion,m,g,lock=self.model_args(root); state=root/"state.json"; guard.reserve_model_relocation(m,src,dst,g,"model-r1",0,lock,state); guard.stage_model_relocation(m,src,dst,g,0,lock,state=state,reservation_id="model-r1",transaction_id="model-tx"); guard.record_model_relocation_disposition("model-tx",state,"passed","passed","config","smoke")

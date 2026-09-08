@@ -16,6 +16,8 @@
 | **MCP Bridge** | `skills/mcp-bridge/` | Generic MCP server for communicating with OpenClaw agents | MCP/Any | ✅ Stable |
 | **Local Inference Optimizer** | `skills/local-inference-optimizer/` | Repeatable llama-server tuning (VRAM, MoE, modalities, load tests) | Cursor | ✅ Stable |
 | **Docker Cleanup** | `skills/docker-cleanup/` | Safe cleanup of Docker build waste without deleting intentional resources | Cursor/Any | ✅ Stable |
+| **Storage Awareness** | `skills/storage-awareness/` | Shared fail-closed policy, capacity preflight, and storage inventory normalization | Agent/Any | Draft |
+| **Windows App Compression** | `skills/windows-app-compression/` | Evidence-led compression analysis for a reviewed Windows app subfolder | Windows/Any | Draft |
 
 ## 📁 Repository Structure
 
@@ -31,6 +33,8 @@ agent-skills/
     ├── dox/                     # AGENTS.md hierarchy framework
     ├── local-inference-optimizer/  # Inference Optimizer skill
     └── docker-cleanup/          # Docker cleanup skill
+    ├── storage-awareness/       # Shared storage safety policy and helpers
+    └── windows-app-compression/ # Windows app compression analysis
 ```
 
 ## 🚀 Usage

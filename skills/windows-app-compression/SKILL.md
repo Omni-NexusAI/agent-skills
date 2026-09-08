@@ -1,0 +1,53 @@
+---
+name: windows-app-compression
+description: >-
+  Analyze or, after exact approval, compress a specific Windows application or
+  runtime subfolder with CompactGUI, NTFS compression, or WOF/compact.exe. Use
+  for Windows app compression, CompactGUI assessment, NTFS/WOF compression, or
+  recovering space from a named installed app. It shares storage-awareness
+  policy and never treats a whole launcher ecosystem, model data, Docker, WSL,
+  or VHDX files as eligible.
+---
+
+# Windows App Compression
+
+This is a direct application-compression skill, not a cleaner. Use the sibling
+`storage-awareness` policy map and helper; do not create a second protection or
+approval list. Audit first, and require an exact reviewed target approval for
+existing apps and runtimes.
+
+## Boundaries
+
+Hard-exclude model weights, checkpoints, model caches, and linked aliases
+(including hardlinks) unconditionally; uncertainty is also exclusion, never a
+reason to proceed. Exclude VHDX,
+Docker, and WSL compaction: route those to the Docker specialist. Never compress
+an entire Pinokio installation; assess one concrete app/runtime subfolder.
+
+Distinguish logical length, allocated size, and observed post-operation savings.
+`compact /q` samples do not establish a tree-wide state or a savings estimate.
+Select an algorithm only from measured evidence, existing WOF-aware state, a
+bounded test, and application smoke checks. No blanket compression or deletion.
+
+## Workflow
+
+1. Run the shared storage preflight and validate a fresh private map.
+2. Run `scripts/windows_app_compression.py analyze` for the exact subfolder.
+3. Review exclusions, dependencies, current state, estimate confidence, and a
+   concrete rollback/smoke plan. Reuse an already live exact approval; ask the
+   user only if the target, scope, rollback, or other consequential evidence has
+   changed.
+4. Run `execute` only with that exact compression grant. Recheck immediately
+   before action, make a bounded test first, smoke the affected app, and log
+   actual before/after allocation. On a failure, stop only that target—do not
+   broaden scope.
+
+The shared capacity result is per target volume: a soft-reserve `warning` does
+not pause unrelated work or invalidate an already exact, bounded grant; a hard
+`defer` stops only this compression target. Do not add a separate Docker/WSL
+pause policy here.
+
+```powershell
+python scripts/windows_app_compression.py analyze --target C:\App\runtime --storage-awareness-path ..\storage-awareness
+python -m unittest discover -s tests -v
+```

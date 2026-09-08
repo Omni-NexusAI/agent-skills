@@ -202,6 +202,8 @@ class GuardTests(unittest.TestCase):
    self.assertGreaterEqual(r["capacity"]["estimated_peak_bytes"],src.stat().st_size)
  def test_model_extensions_and_huggingface_cache_are_excluded(self):
   self.assertTrue(guard.model_like("C:/cache/huggingface/tokenizers/a.json")); self.assertTrue(guard.model_like("C:/cache/lm-studio/models/x/vocab.txt")); self.assertTrue(guard.model_like("C:/work/a.onnx")); self.assertTrue(guard.model_like("C:/work/a.pth"))
+ def test_lm_studio_extension_runtime_is_not_blanket_model_excluded(self):
+  self.assertFalse(guard.model_like("C:/Users/example/.cache/lm-studio/extensions/backends/runtime.dll")); self.assertTrue(guard.model_like("C:/Users/example/.cache/lm-studio/extensions/models/runtime.js")); self.assertTrue(guard.model_like("C:/Users/example/.cache/lm-studio/models/vendor/weights.json"))
  def test_checkpoint_refuses_model_directory(self):
   with tempfile.TemporaryDirectory() as d:
    root=Path(d); model=root/"models"; model.mkdir(); m=root/"policy.json"; m.write_text(json.dumps(policy(protected_paths=[],approved_roots=[str(root)])))

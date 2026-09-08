@@ -14,7 +14,7 @@ DEFAULT_HARD_PERCENT = .01
 DEFAULT_PEAK_OVERHEAD_PERCENT = .25
 DEFAULT_PROBE_BYTES = 256 * MiB
 MODEL_SUFFIXES = (".gguf", ".safetensors", ".ckpt", ".pt", ".bin", ".pth", ".onnx", ".h5")
-MODEL_DIRS = ("checkpoint", "checkpoints", "model-cache", "model_cache", "huggingface", "hf-cache", "transformers", "models", "lm-studio", "lm_studio")
+MODEL_DIRS = ("checkpoint", "checkpoints", "model-cache", "model_cache", "huggingface", "hf-cache", "transformers", "models")
 TEXT_RUNTIME_SUFFIXES = {".py", ".js", ".txt"}
 PE_RUNTIME_SUFFIXES = {".dll", ".exe"}
 

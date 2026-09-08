@@ -94,7 +94,11 @@ Report exact path, purpose, logical and allocated bytes when actually measured,
 compression state and confidence, dependencies, recommended action, and recovery
 requirements. Do not infer allocation or savings from a representative file.
 Model weights, checkpoints, model caches, and their linked aliases are keep by
-default.
+default. Do not treat an entire application cache as model data solely because
+its product name contains "model" or "LM Studio": retain the explicit `models`
+hierarchy and model-file/cache markers, then assess a distinct extension runtime
+subfolder under the normal hardlink, reparse-point, content, grant, and smoke
+checks.
 
 ## Commands
 

@@ -7,6 +7,8 @@
 | Skill | Directory | Description | Platform | Status |
 |---|---|---|---|---|
 | **Agent Workflow Rules** | `skills/agent-workflow-rules/` | Project-neutral engineering workflow, safety, delivery, and verification rules | Agent/Any | Active |
+| **AI-Link Workflow Rules** | `skills/ai-link-workflow-rules/` | Cross-surface planning, implementation, and validation for the Unity XR client, bridge, and Agent Zero | Agent/Unity XR | Active |
+| **Storage Awareness** | `skills/storage-awareness/` | Assess storage impact and coordinate bounded writes, cleanup, and recovery safely | Agent/Any | Active |
 | **DOX** | `skills/dox/` | Self-documenting AGENTS.md hierarchy with ambient read-before-edit and update-after-edit contracts | Agent/Any | Active |
 | **Cursor Workflow Rules** | `skills/cursor-workflow-rules/` | Legacy platform-specific workflow rules | Cursor | Archived |
 | **AgentZero Workflow Rules** | `skills/agentzero-workflow-rules/` | Legacy project-specific workflow rules | Agent Zero | Archived |
@@ -24,6 +26,9 @@ agent-skills/
 ├── README.md                    # This file
 ├── .gitignore
 └── skills/
+    ├── agent-workflow-rules/   # Project-neutral engineering workflow and safety
+    ├── ai-link-workflow-rules/ # AI-Link cross-surface engineering workflow
+    ├── storage-awareness/      # Storage impact, safety, and recovery workflow
     ├── simplemem/               # SimpleMem skill
     ├── voice-messaging/         # Voice Messaging skill
     ├── initializer/             # Initializer skill

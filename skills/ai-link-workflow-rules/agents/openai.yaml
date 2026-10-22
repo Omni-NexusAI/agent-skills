@@ -1,0 +1,6 @@
+interface:
+  display_name: "AI-Link Workflow Rules"
+  short_description: "Coordinate AI-Link client and backend delivery"
+  default_prompt: "Use $ai-link-workflow-rules to plan, implement, and verify this AI-Link change across the Unity client and Agent Zero bridge."
+policy:
+  allow_implicit_invocation: true

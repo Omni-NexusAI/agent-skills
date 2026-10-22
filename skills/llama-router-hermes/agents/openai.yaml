@@ -1,0 +1,4 @@
+interface:
+  display_name: "llama.cpp Router + Agent Frameworks"
+  short_description: "Connect agent clients to local or Tailscale routers"
+  default_prompt: "Use $llama-router-hermes to set up my llama.cpp router and connect my chosen agent framework, then verify a real chat."

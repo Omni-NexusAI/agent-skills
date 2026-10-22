@@ -7,6 +7,10 @@
 | Skill | Directory | Description | Platform | Status |
 |---|---|---|---|---|
 | **Agent Workflow Rules** | `skills/agent-workflow-rules/` | Project-neutral engineering workflow, safety, delivery, and verification rules | Agent/Any | Active |
+| **AI-Link Workflow Rules** | `skills/ai-link-workflow-rules/` | Cross-surface planning, implementation, and validation for the Unity XR client, bridge, and Agent Zero | Agent/Unity XR | Active |
+| **3D Printing Workflow** | `skills/3d-printing-workflow/` | Prepare functional FDM prints, verify CAD-to-slicer handoffs, and deliver organized project files | Agent/3D Printing | Active |
+| **Llama Router Hermes** | `skills/llama-router-hermes/` | Set up llama.cpp routers and connect agent frameworks through native API adapters, including Hermes Agent | Agent/Any | Active |
+| **Storage Awareness** | `skills/storage-awareness/` | Assess storage impact and coordinate bounded writes, cleanup, and recovery safely | Agent/Any | Active |
 | **DOX** | `skills/dox/` | Self-documenting AGENTS.md hierarchy with ambient read-before-edit and update-after-edit contracts | Agent/Any | Active |
 | **Cursor Workflow Rules** | `skills/cursor-workflow-rules/` | Legacy platform-specific workflow rules | Cursor | Archived |
 | **AgentZero Workflow Rules** | `skills/agentzero-workflow-rules/` | Legacy project-specific workflow rules | Agent Zero | Archived |
@@ -24,6 +28,11 @@ agent-skills/
 ├── README.md                    # This file
 ├── .gitignore
 └── skills/
+    ├── agent-workflow-rules/   # Project-neutral engineering workflow and safety
+    ├── ai-link-workflow-rules/ # AI-Link cross-surface engineering workflow
+    ├── 3d-printing-workflow/   # Functional FDM print preparation and delivery workflow
+    ├── llama-router-hermes/    # llama.cpp router setup and agent framework adapters
+    ├── storage-awareness/      # Storage impact, safety, and recovery workflow
     ├── simplemem/               # SimpleMem skill
     ├── voice-messaging/         # Voice Messaging skill
     ├── initializer/             # Initializer skill

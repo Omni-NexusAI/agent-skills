@@ -47,6 +47,7 @@ For repositories with a remote collaboration workflow:
 3. Avoid global installation when an isolated project environment is available.
 4. Before replacing or migrating an environment, inventory and preserve its data, configuration, secrets references, and required state.
 5. Start replacement environments alongside existing ones when practical, verify them, and switch only with authorization.
+6. Reuse one project-scoped virtual environment for repeated tests when its dependencies and isolation still fit; create another only for a concrete incompatible requirement.
 
 ## Fast, reversible iteration
 
@@ -58,11 +59,12 @@ For repositories with a remote collaboration workflow:
 
 ## Non-destructive container operations
 
-1. Do not stop, remove, overwrite, prune, or replace containers, images, volumes, networks, or persisted data unless the user explicitly authorizes that target and action.
-2. Use unique project names, instance names, and host ports for parallel validation.
-3. Restrict cleanup to artifacts created by the task or explicitly placed in scope.
-4. Preserve and verify persistent data before any authorized replacement.
-5. Retain temporary resources until cleanup is requested or explicitly approved.
+1. Do not stop, remove, overwrite, prune, or replace existing containers, images, volumes, networks, or persisted data unless the user explicitly authorizes that target and action. A container created as disposable by the current task may be automatically removed when its results are preserved and it has no needed state.
+2. Before starting a test container, inventory the relevant existing containers, Compose projects, ports, mounts, and data. Reuse a suitable task-owned test container or stable Compose project name across iterations; prefer one reusable test container for a test effort.
+3. Use a second or third test container only when distinct roles or simultaneous isolation are required and cannot be tested sequentially in the same one. Cap task-owned test containers for one test effort at three; if the cap is already reached, reuse or finish and dispose of a task-owned disposable instance before creating another. Do not bypass the cap with new names or Compose project names.
+4. Name test instances predictably and use distinct host ports only when they must coexist. Avoid spawning a new container for each probe, test run, or failed attempt.
+5. For new throwaway test containers, use automatic removal on exit when feasible; first preserve required logs and results. Remove only task-created disposable instances whose ownership and lack of needed state are established. Inventory and report older or user-owned candidates for separate cleanup authorization.
+6. Restrict cleanup to artifacts created by the task or explicitly placed in scope. Preserve and verify persistent data before any authorized replacement; never remove volumes or shared mounts as incidental test cleanup.
 
 ## Tool and documentation selection
 
@@ -88,4 +90,3 @@ For repositories with a remote collaboration workflow:
 4. Structure README content in reader order: purpose and outcome, key user-visible capabilities, the quickest supported way to try it, then installation, configuration, operational detail, API/reference material, development, and contribution guidance as applicable.
 5. Before finalizing documentation, perform a newcomer read-through: verify that a prospective user can answer "What is this?", "What can it do for me?", "Is it suitable for my use case?", and "How do I begin?" without needing to inspect source code or infer developer jargon.
 6. Keep documentation concise and current; record stable intent rather than task history. Do not overstate experimental, scaffolded, unavailable, or developer-only functionality.
-

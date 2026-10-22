@@ -8,6 +8,7 @@
 |---|---|---|---|---|
 | **Agent Workflow Rules** | `skills/agent-workflow-rules/` | Project-neutral engineering workflow, safety, delivery, and verification rules | Agent/Any | Active |
 | **AI-Link Workflow Rules** | `skills/ai-link-workflow-rules/` | Cross-surface planning, implementation, and validation for the Unity XR client, bridge, and Agent Zero | Agent/Unity XR | Active |
+| **3D Printing Workflow** | `skills/3d-printing-workflow/` | Prepare functional FDM prints, verify CAD-to-slicer handoffs, and deliver organized project files | Agent/3D Printing | Active |
 | **Storage Awareness** | `skills/storage-awareness/` | Assess storage impact and coordinate bounded writes, cleanup, and recovery safely | Agent/Any | Active |
 | **DOX** | `skills/dox/` | Self-documenting AGENTS.md hierarchy with ambient read-before-edit and update-after-edit contracts | Agent/Any | Active |
 | **Cursor Workflow Rules** | `skills/cursor-workflow-rules/` | Legacy platform-specific workflow rules | Cursor | Archived |
@@ -28,6 +29,7 @@ agent-skills/
 └── skills/
     ├── agent-workflow-rules/   # Project-neutral engineering workflow and safety
     ├── ai-link-workflow-rules/ # AI-Link cross-surface engineering workflow
+    ├── 3d-printing-workflow/   # Functional FDM print preparation and delivery workflow
     ├── storage-awareness/      # Storage impact, safety, and recovery workflow
     ├── simplemem/               # SimpleMem skill
     ├── voice-messaging/         # Voice Messaging skill
